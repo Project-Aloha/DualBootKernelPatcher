@@ -74,10 +74,10 @@ int main(int argc, char *argv[]) {
     read_file_content(&shellCode);
 
     // Patch Kernel.
-    PatchKernel(&originImage, &uefiImage, &shellCode, &outputImage, &stack);
+    void *buf = PatchKernel(&originImage, &uefiImage, &shellCode, &outputImage, &stack);
 
     // Output buffer to new kernel.
-    if (outputImage.fileBuffer != NULL) {
+    if (outputImage.fileBuffer != NULL && buf != NULL) {
         write_file_content(&outputImage);
     } else {
         printf("Error Patching Kernel.\n");
@@ -229,7 +229,8 @@ uint8_t *PatchKernel(pFileContent kernel, pFileContent uefi, pFileContent shellC
     } else // Unknown stuff
     if (patchedKernel->fileBuffer[7] != 0x14) {
         // There is no branch instruction!
-        printf("Error: Invalid Kernel Image. Branch instruction not found within first two instruction slots.\n");
+        printf("Error: Invalid Kernel Image. Branch instruction not found within first two instruction slots.\n"
+               "Please Check the kernel you provided.\n");
         return NULL;
     }
 
