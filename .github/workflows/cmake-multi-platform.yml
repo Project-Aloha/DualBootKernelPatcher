@@ -1,5 +1,3 @@
-# This starter workflow is for a CMake project running on multiple platforms. There is a different starter workflow if you just want a single platform.
-# See: https://github.com/actions/starter-workflows/blob/main/ci/cmake-single-platform.yml
 name: Build patcher for multi platforms.
 
 on:
@@ -8,39 +6,43 @@ on:
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
-  
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
-      # Set fail-fast to false to ensure that feedback is delivered for all matrix combinations. Consider changing this to true when your workflow is stable.
       fail-fast: false
-
-      # Set up a matrix to run the following 3 configurations:
-      # 1. <Windows, Release, latest MSVC compiler toolchain on the default runner image, default generator>
-      # 2. <Linux, Release, latest Clang compiler toolchain on the default runner image, default generator>
-      #
-      # To add more build types (Release, Debug, RelWithDebInfo, etc.) customize the build_type list.
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        arch: [x86_64, aarch64]
-        build_type: [Release]
-        c_compiler: [clang, cl]
         include:
+          # Windows x86_64
           - os: windows-latest
+            arch: x86_64
             c_compiler: cl
             cpp_compiler: cl
-          - os: ubuntu-latest
-            c_compiler: clang
-        exclude:
-          - os: windows-latest
-            c_compiler: clang
-          - os: ubuntu-latest
-            c_compiler: cl
-          - os: macos-latest
-            c_compiler: cl
-          - os: macos-latest
+          
+          # Windows ARM64
+          - os: windows-11-arm
             arch: aarch64
+            c_compiler: cl
+            cpp_compiler: cl
+
+          # Linux x86_64
+          - os: ubuntu-latest
+            arch: x86_64
+            c_compiler: clang
+            cpp_compiler: clang
+
+          # Linux ARM64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+            c_compiler: clang
+            cpp_compiler: clang
+
+          # macOS x86_64
+          - os: macos-latest
+            arch: x86_64
+            c_compiler: clang
+            cpp_compiler: clang
 
     steps:
       - uses: actions/checkout@v4
@@ -50,79 +52,28 @@ jobs:
         shell: bash
         run: |
           echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
-          echo  >> $GITHUB_ENV
-      
+
       - name: Configure Compiler
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm' }}
         run: |
           sudo apt install gcc-aarch64-linux-gnu
           echo -e \\nset\(CMAKE_C_FLAGS "--target=${{ matrix.arch }}-linux-gnu"\) \\n >> ${{ github.workspace }}/CMakeLists.txt
-          
+
       - name: Configure CMake
         run: >
           cmake -B ${{ steps.strings.outputs.build-output-dir }}
           -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
           -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_BUILD_TYPE=Release
           -S ${{ github.workspace }}
 
-      - name: Build Patcher.
-        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --target DualBootKernelPatcher
+      - name: Build Patcher
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release --target DualBootKernelPatcher
 
-      - name: Upload Windows X86_64 Artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
-        if: ${{ matrix.arch == 'x86_64' && matrix.os == 'windows-latest' }}
         with:
-          name: DualBootKernelPatcher-Windows-X86_64
+          name: DualBootKernelPatcher-${{ matrix.os }}-${{ matrix.arch }}
           path: |
-            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelPatcher.exe
-            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelRemover.exe
-
-      - name: Upload Linux X86_64 Artifact
-        uses: actions/upload-artifact@v4
-        if: ${{ matrix.arch == 'x86_64' && matrix.os == 'ubuntu-latest' }}
-        with:
-          name: DualBootKernelPatcher-Linux-X86_64
-          path: |
-            ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelPatcher
-            ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelRemover
-      
-      - name: Upload MacOS X86_64 Artifact
-        uses: actions/upload-artifact@v4
-        if: ${{ matrix.arch == 'x86_64' && matrix.os == 'macos-latest' }}
-        with:
-          name: DualBootKernelPatcher-MacOS-X86_64
-          path: |
-            ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelPatcher
-            ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelRemover
-
-      - name: Upload Linux ARM64 Artifact
-        uses: actions/upload-artifact@v4
-        if: ${{ matrix.arch == 'aarch64' && matrix.os == 'ubuntu-latest' }}
-        with:
-          name: DualBootKernelPatcher-Linux-ARM64
-          path: |
-            ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelPatcher
-            ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelRemover
-
-      - name: Upload Windows ARM64 Artifact
-        uses: actions/upload-artifact@v4
-        if: ${{ matrix.arch == 'aarch64' && matrix.os == 'windows-latest' }}
-        with:
-          name: DualBootKernelPatcher-Windows-ARM64
-          path: |
-            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelPatcher.exe
-            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelRemover.exe
-
-      - name: Build shellcodes.
-        if: ${{ matrix.arch == 'aarch64' && matrix.os == 'ubuntu-latest' }}
-        run: |
-          sudo apt install binutils-aarch64-linux-gnu
-          cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --target all
-
-      - name: Upload ShellCode Artifact
-        uses: actions/upload-artifact@v4
-        if: ${{ matrix.arch == 'aarch64' && matrix.os == 'ubuntu-latest' }}
-        with:
-          name: Shellcodes
-          path: ${{ steps.strings.outputs.build-output-dir }}/ShellCode/*.bin
+            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelPatcher*
+            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelRemover*
