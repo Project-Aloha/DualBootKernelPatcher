@@ -35,8 +35,6 @@ jobs:
         exclude:
           - os: windows-latest
             c_compiler: clang
-          - os: windows-latest
-            arch: aarch64
           - os: ubuntu-latest
             c_compiler: cl
           - os: macos-latest
@@ -71,41 +69,50 @@ jobs:
       - name: Build Patcher.
         run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --target DualBootKernelPatcher
 
-      - name: Upload Windows x64 Artifact
+      - name: Upload Windows X86_64 Artifact
         uses: actions/upload-artifact@v4
         if: ${{ matrix.arch == 'x86_64' && matrix.os == 'windows-latest' }}
         with:
-          name: DualBootKernelPatcher-Windows-x64
+          name: DualBootKernelPatcher-Windows-X86_64
           path: |
             ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelPatcher.exe
             ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelRemover.exe
 
-      - name: Upload Linux x64 Artifact
+      - name: Upload Linux X86_64 Artifact
         uses: actions/upload-artifact@v4
         if: ${{ matrix.arch == 'x86_64' && matrix.os == 'ubuntu-latest' }}
         with:
-          name: DualBootKernelPatcher-Linux-x64
+          name: DualBootKernelPatcher-Linux-X86_64
           path: |
             ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelPatcher
             ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelRemover
       
-      - name: Upload MacOS x64 Artifact
+      - name: Upload MacOS X86_64 Artifact
         uses: actions/upload-artifact@v4
         if: ${{ matrix.arch == 'x86_64' && matrix.os == 'macos-latest' }}
         with:
-          name: DualBootKernelPatcher-MacOS-x64
+          name: DualBootKernelPatcher-MacOS-X86_64
           path: |
             ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelPatcher
             ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelRemover
 
-      - name: Upload Linux arm64 Artifact
+      - name: Upload Linux ARM64 Artifact
         uses: actions/upload-artifact@v4
         if: ${{ matrix.arch == 'aarch64' && matrix.os == 'ubuntu-latest' }}
         with:
-          name: DualBootKernelPatcher-Linux-arm64
+          name: DualBootKernelPatcher-Linux-ARM64
           path: |
             ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelPatcher
             ${{ steps.strings.outputs.build-output-dir }}/DualBootKernelRemover
+
+      - name: Upload Windows ARM64 Artifact
+        uses: actions/upload-artifact@v4
+        if: ${{ matrix.arch == 'aarch64' && matrix.os == 'windows-latest' }}
+        with:
+          name: DualBootKernelPatcher-Windows-ARM64
+          path: |
+            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelPatcher.exe
+            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelRemover.exe
 
       - name: Build shellcodes.
         if: ${{ matrix.arch == 'aarch64' && matrix.os == 'ubuntu-latest' }}
