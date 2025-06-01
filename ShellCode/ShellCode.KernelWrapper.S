@@ -47,8 +47,8 @@ _ShellCodeStart:
 
 // Copy Sub program, X4 is src, X5 is dst, X6 is size
 _CopyLoop:
-    ldp     x2, x3, [x4], #0x10     // Save value at [x4](pointer) to x2 and x3, then x4 add 16.
-    stp     x2, x3, [x5], #0x10     // Save value in x2 and x3 to [x5](pointer), then x5 add 16
+    ldp     x7, x8, [x4], #0x10     // Save value at [x4](pointer) to x7 and x8, then x4 add 16.
+    stp     x7, x8, [x5], #0x10     // Save value in x7 and x8 to [x5](pointer), then x5 add 16
     subs    x6, x6, #0x10           // x6 - 16, if , set CPSR register to 0.
     b.ne    _CopyLoop               // Check CPSR, if CPSR != 0, jump back to _CopyLoop.
     ret                             // Return when finish.
