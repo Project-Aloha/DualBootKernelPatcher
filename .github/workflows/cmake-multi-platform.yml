@@ -77,3 +77,4 @@ jobs:
           path: |
             ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelPatcher*
             ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelRemover*
+            ${{ steps.strings.outputs.build-output-dir }}/**/HDRTool*
