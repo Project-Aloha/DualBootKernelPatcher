@@ -8,7 +8,7 @@
  *      2. Qualcomm patched kernel.
  *      3. Image file kernel with efi stub.
  *
- *  Copyright (c) 2021-2024 The DuoWoa authors. All rights reserved.
+ *  Copyright (c) 2021-2025 The DuoWoa authors. All rights reserved.
  *  MIT License
  *
  */
@@ -23,7 +23,7 @@
  * @return program status
  */
 int main(int argc, char *argv[]) {
-    printf("WOA-msmnile DualBoot Patch Remover v1.2.0.0\n");
+    printf("Project Aloha DualBoot Patch Remover v1.2.0.0\n");
     printf("Copyright (c) 2021-2024 The DuoWoA authors\n\n");
     if (argc != 3) {
         // Print usage if arg numbers not meet.

@@ -1,7 +1,7 @@
 /** @file
  * DualBoot Kernel Patcher Header File.
  *
- *  Copyright (c) 2021-2024 The DuoWoa authors. All rights reserved.
+ *  Copyright (c) 2021-2025 The DuoWoa authors. All rights reserved.
  *  MIT License
  *
  */
