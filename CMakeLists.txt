@@ -9,6 +9,7 @@ endif ()
 # Compile the patcher.
 add_executable(DualBootKernelPatcher patcher.c utils.c)
 add_executable(DualBootPatchRemover remover.c utils.c)
+add_executable(HDRTool HDRTool.c utils.c)
 
 # Compile Shell Codes with aarch64 gcc.
 add_subdirectory(ShellCode)
