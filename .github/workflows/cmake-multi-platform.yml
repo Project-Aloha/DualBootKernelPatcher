@@ -19,7 +19,7 @@ jobs:
             arch: x86_64
             c_compiler: cl
             cpp_compiler: cl
-          
+
           # Windows ARM64
           - os: windows-11-arm
             arch: aarch64
@@ -67,14 +67,35 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -S ${{ github.workspace }}
 
-      - name: Build Patcher
-        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release --target DualBootKernelPatcher
+      - name: Build Patcher and other tools
+        if: ${{ matrix.os != 'ubuntu-latest' || matrix.os != 'ubuntu-24.04-arm' }}
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release --target DualBootKernelPatcher DualBootPatchRemover HDRTool
 
-      - name: Upload Artifact
+      - name: Build ASM Codes
+        if: ${{ matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm' }}
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release
+
+      - name: Upload Tools
         uses: actions/upload-artifact@v4
         with:
-          name: DualBootKernelPatcher-${{ matrix.os }}-${{ matrix.arch }}
+          name: Tools-${{ matrix.os }}-${{ matrix.arch }}
           path: |
             ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelPatcher*
-            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelRemover*
+            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootPatchRemover*
             ${{ steps.strings.outputs.build-output-dir }}/**/HDRTool*
+
+      - name: Upload ASM Bins
+        uses: actions/upload-artifact@v4
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        with:
+          name: Shellcodes
+          path: |
+            ${{ steps.strings.outputs.build-output-dir }}/ShellCode/*
+
+      - name: Upload Configs
+        uses: actions/upload-artifact@v4
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        with:
+          name: Configs
+          path: |
+            Config/*
