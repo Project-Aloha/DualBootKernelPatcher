@@ -16,7 +16,17 @@
 *
 *   Note:
 *      You need to add memory region for linux dtb in device tree manually
-*      otherwise linux will NOT boot.
+*      otherwise linux will NOT boot. check the sample below, you can find
+*      it in android fdt at /sys/firmware/fdt.
+*       memory {
+*           ddr_device_type = <0x08>;
+*           device_type = "memory";
+*           #address-cells = <2>;
+*           #size-cells = <2>;
+*           reg = 	<0x0 0x80000000 0x0 0x3b800000>,
+*                   <0x1 0x80000000 0x1 0x00000000>,
+*                   <0x0 0xc0000000 0x0 0xc0000000>;
+*       };
 *
 *   Usage:
 *      ./DualBootKernelPatcher OriginalKernel mainline_dtb output DualBoot.Sm8250DT.cfg ShellCode.KernelWrapper.bin
