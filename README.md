@@ -11,7 +11,7 @@
     + CMake
   - Clone this repo
     ```
-    git clone https://github.com/woa-msmnile/DualBootKernelPacther
+    git clone https://github.com/Project-Aloha/DualBootKernelPatcher
     ```
   - Setup CMake.
     ```
