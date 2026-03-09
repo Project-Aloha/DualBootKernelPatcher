@@ -18,7 +18,7 @@
     cd DualBootKernelPacther
     cmake -B output -S .
     ```
-  - Build !
+  - Build!
     ```
     cmake --build output -j 12
     ```
@@ -35,7 +35,7 @@
     + Shell Code binaries can be find under `output/ShellCode/`
   
 ## See More
-  - You can go to our document page to get more infomation about the Dual Boot Patcher.
+  - You can go to our [document website](https://aloha.firmware.icu/) to get more infomation about the Dual Boot Patcher.
 
 ## License
   MIT License.
