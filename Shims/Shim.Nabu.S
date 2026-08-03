@@ -1,7 +1,12 @@
 .include "DummyHead.S"
 
-/* Shell Code for Xiaomi Pad 5 Pro */
-_ShellCodeStart:
+/* Simplified Shim for Xiaomi Pad 5 Pro */
+_ShimStart:
+    mov     x19, x0
+    mov     x20, x1
+    mov     x21, x2
+    mov     x22, x3
+    mov     x23, x4
     movz    x4, #0x9004
     movk    x4, #0x390, lsl #16     // Store 0x3909004 to x4, which is io status reg of gpio 9.
     movz    x5, #0x3004

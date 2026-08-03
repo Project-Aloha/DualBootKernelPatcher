@@ -6,26 +6,28 @@
 // Size of this file must be 0x40 after compiling to binary.
 
 _KernelHead:
-    b       0x40        // Code 1, Goto ShellCode
+    b       0x40        // Code 1, go to ShimLoader
 
 _LinuxStart:
     b       0x0         // Code2, Goto Linux Kernel
-    .ascii  "SHLL"      // Image load offset, use it as shell code magic here
-    .ascii  "COD\0"     // Image load offset, use it as shell code magic here
+    .ascii  "SHIM"      // ShimLoader magic
+    .ascii  "LDR\0"
     .long   0           // Effective Image size L
     .long   0           // Effective Image size H
     .long   0           // Flags L
     .long   0           // Flags H
 
-_StackBase:
-    .long   0           // reserved2, Stack Base LWORD
-    .long   0           // reserved2, Stack Base HWORD
+_CopyAddress:
+_ManifestOffset:
+    .long   0           // reserved2 LWORD
+    .long   0           // reserved2 HWORD
 
-_StackSize:
-    .long   0           // reserved3, Stack Size L
-    .long   0           // reserved3, Stack Size H
+_CopySize:
+_ManifestSize:
+    .long   0           // reserved3 LWORD
+    .long   0           // reserved3 HWORD
 
-_KernelSize:
+_BaseImageSize:
     .long   0           // reserved4, Kernel Size L
     .long   0           // reserved4, Kernel Size H
 

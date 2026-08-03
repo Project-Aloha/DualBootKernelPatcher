@@ -53,34 +53,3 @@ int write_file_content(pFileContent fileContent) {
     fclose(pFile);
     return 0;
 }
-
-/**
- * Parse given config.
- *
- * @param fileContent
- * @param config Config info read from config file
- * @retval -EINVAL Give File not found.
- *
- */
-int parse_config(FileContent *fileContent, pConfig config) {
-    // Check file size
-    if (!get_file_size(fileContent))
-        return -EINVAL;
-
-    // Open config file
-    FILE *pConfigFile = fopen(fileContent->filePath, "r");
-    char key[256];
-    uint32_t value = 0;
-
-    // Parse
-    while (fscanf(pConfigFile, "%[^=]=%x\n", key, &value) != EOF) {
-        if (strcmp(key, "StackBase") == 0) {
-            config->StackBase = value;
-        } else if (strcmp(key, "StackSize") == 0) {
-            config->StackSize = value;
-        }
-    }
-
-    fclose(pConfigFile);
-    return 0;
-}

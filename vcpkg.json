@@ -1,0 +1,7 @@
+{
+  "name": "multi-boot-kernel-patcher",
+  "version-string": "1.2.0.0",
+  "dependencies": [
+    "inih"
+  ]
+}

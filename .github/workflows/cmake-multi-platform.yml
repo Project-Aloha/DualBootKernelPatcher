@@ -1,101 +1,142 @@
-name: Build patcher for multi platforms.
+name: Build patcher for multiple platforms
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main, feature/multi-boot]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   build:
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Windows x86_64
-          - os: windows-latest
-            arch: x86_64
-            c_compiler: cl
-            cpp_compiler: cl
-
-          # Windows ARM64
-          - os: windows-11-arm
-            arch: aarch64
-            c_compiler: cl
-            cpp_compiler: cl
-
-          # Linux x86_64
-          - os: ubuntu-latest
-            arch: x86_64
+          - name: Windows x64
+            os: windows-latest
+            arch: x64
+            cmake_arch: x64
+            vcpkg_triplet: x64-windows-static
+            build_shim_loader: 'OFF'
+            executable_suffix: .exe
+            executable_directory: Release
+          - name: Windows ARM64
+            os: windows-11-arm
+            arch: arm64
+            cmake_arch: ARM64
+            vcpkg_triplet: arm64-windows-static
+            build_shim_loader: 'OFF'
+            executable_suffix: .exe
+            executable_directory: Release
+          - name: Linux x64
+            os: ubuntu-latest
+            arch: x64
             c_compiler: clang
-            cpp_compiler: clang
-
-          # Linux ARM64
-          - os: ubuntu-24.04-arm
-            arch: aarch64
+            build_shim_loader: 'ON'
+            executable_suffix: ''
+            executable_directory: .
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+            arch: arm64
             c_compiler: clang
-            cpp_compiler: clang
-
-          # macOS x86_64
-          - os: macos-latest
-            arch: x86_64
+            build_shim_loader: 'OFF'
+            executable_suffix: ''
+            executable_directory: .
+          - name: macOS x64
+            os: macos-15-intel
+            arch: x64
             c_compiler: clang
-            cpp_compiler: clang
+            build_shim_loader: 'OFF'
+            executable_suffix: ''
+            executable_directory: .
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set reusable strings
-        id: strings
-        shell: bash
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
         run: |
-          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+          sudo apt-get update
+          sudo apt-get install --yes libinih-dev pkg-config
 
-      - name: Configure Compiler
-        if: ${{ matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm' }}
-        run: |
-          sudo apt install gcc-aarch64-linux-gnu
-          echo -e \\nset\(CMAKE_C_FLAGS "--target=${{ matrix.arch }}-linux-gnu"\) \\n >> ${{ github.workspace }}/CMakeLists.txt
+      - name: Install ShimLoader toolchain
+        if: matrix.build_shim_loader == 'ON'
+        run: sudo apt-get install --yes binutils-aarch64-linux-gnu
 
-      - name: Configure CMake
-        run: >
-          cmake -B ${{ steps.strings.outputs.build-output-dir }}
-          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install inih pkg-config
+
+      - name: Configure CMake on Windows
+        if: runner.os == 'Windows'
+        run: >-
+          cmake -S "${{ github.workspace }}"
+          -B "${{ github.workspace }}/build"
+          -A ${{ matrix.cmake_arch }}
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ matrix.vcpkg_triplet }}
+          -DBUILD_SHIM_LOADER=${{ matrix.build_shim_loader }}
+
+      - name: Configure CMake on Unix
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S "${{ github.workspace }}"
+          -B "${{ github.workspace }}/build"
           -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
           -DCMAKE_BUILD_TYPE=Release
-          -S ${{ github.workspace }}
+          -DBUILD_SHIM_LOADER=${{ matrix.build_shim_loader }}
 
-      - name: Build Patcher and other tools
-        if: ${{ matrix.os != 'ubuntu-latest' || matrix.os != 'ubuntu-24.04-arm' }}
-        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release --target DualBootKernelPatcher DualBootPatchRemover HDRTool
+      - name: Build host tools
+        run: >-
+          cmake --build "${{ github.workspace }}/build"
+          --config Release
+          --target MultiBootKernelPatcher HDRTool
 
-      - name: Build ASM Codes
-        if: ${{ matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm' }}
-        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release
+      - name: Build ShimLoader
+        if: matrix.build_shim_loader == 'ON'
+        run: >-
+          cmake --build "${{ github.workspace }}/build"
+          --config Release
+          --target ShimLoader_BIN Shims
 
-      - name: Upload Tools
+      - name: Stage host tools
+        shell: bash
+        run: |
+          mkdir -p artifacts/tools
+          cp "build/${{ matrix.executable_directory }}/MultiBootKernelPatcher${{ matrix.executable_suffix }}" artifacts/tools/
+          cp "build/${{ matrix.executable_directory }}/HDRTool${{ matrix.executable_suffix }}" artifacts/tools/
+
+      - name: Upload host tools
         uses: actions/upload-artifact@v4
         with:
           name: Tools-${{ matrix.os }}-${{ matrix.arch }}
-          path: |
-            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootKernelPatcher*
-            ${{ steps.strings.outputs.build-output-dir }}/**/DualBootPatchRemover*
-            ${{ steps.strings.outputs.build-output-dir }}/**/HDRTool*
+          path: artifacts/tools
+          if-no-files-found: error
 
-      - name: Upload ASM Bins
+      - name: Upload ShimLoader
+        if: matrix.build_shim_loader == 'ON'
         uses: actions/upload-artifact@v4
-        if: ${{ matrix.os == 'ubuntu-latest' }}
         with:
-          name: Shellcodes
-          path: |
-            ${{ steps.strings.outputs.build-output-dir }}/ShellCode/*
+          name: ShimLoader
+          path: build/ShimLoader/ShimLoader.bin
+          if-no-files-found: error
 
-      - name: Upload Configs
+      - name: Upload simplified Shims
+        if: matrix.build_shim_loader == 'ON'
         uses: actions/upload-artifact@v4
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        with:
+          name: Shims
+          path: build/Shims/Shim.*.bin
+          if-no-files-found: error
+
+      - name: Upload configs
+        if: matrix.build_shim_loader == 'ON'
+        uses: actions/upload-artifact@v4
         with:
           name: Configs
-          path: |
-            Config/*
+          path: Config
+          if-no-files-found: error

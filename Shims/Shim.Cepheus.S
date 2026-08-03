@@ -1,7 +1,12 @@
 .include "DummyHead.S"
 
-/* Shell Code for Xiaomi 9 */
-_ShellCodeStart:
+/* Simplified Shim for Xiaomi 9 */
+_ShimStart:
+    mov     x19, x0
+    mov     x20, x1
+    mov     x21, x2
+    mov     x22, x3
+    mov     x23, x4
     movz    x4, #0x1000
     movk    x4, #0x396, lsl #16     // Store 0x3961004 to x4, which is io status reg of gpio 97.
     ldr     w5, [x4]
