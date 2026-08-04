@@ -4,6 +4,27 @@ project(MultiBootKernelPatcher C)
 option(BUILD_SHIM_LOADER "Build the ARM64 ShimLoader binary" ON)
 option(BUILD_SHIMS "Build the simplified ARM64 Shims" ${BUILD_SHIM_LOADER})
 
+if (BUILD_SHIM_LOADER OR BUILD_SHIMS)
+    if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+        # MinGW compiler download link:
+        # https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads
+        set(ARM64_TOOLCHAIN_PREFIX
+            "E:/aarch64-gcc/aarch64-none-elf/bin/"
+            CACHE STRING "ARM64 binutils path and executable prefix")
+    elseif (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+        set(ARM64_TOOLCHAIN_PREFIX "aarch64-linux-gnu-"
+            CACHE STRING "ARM64 binutils path and executable prefix")
+    else ()
+        message(FATAL_ERROR
+            "Building ARM64 Shim binaries on ${CMAKE_HOST_SYSTEM_NAME} is not supported")
+    endif ()
+
+    set(ARM64_AS "${ARM64_TOOLCHAIN_PREFIX}as"
+        CACHE FILEPATH "ARM64 assembler")
+    set(ARM64_OBJCOPY "${ARM64_TOOLCHAIN_PREFIX}objcopy"
+        CACHE FILEPATH "ARM64 objcopy")
+endif ()
+
 set(CMAKE_C_STANDARD 11)
 if (MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
