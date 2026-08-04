@@ -52,13 +52,24 @@ target_include_directories(inih_static PUBLIC
 set(INIH_TARGET inih_static)
 
 # Compile the patcher.
-add_executable(MultiBootKernelPatcher patcher.c shim.c shim_config.c utils.c)
+add_executable(MultiBootKernelPatcher
+    src/patcher.c
+    src/shim.c
+    src/shim_config.c
+    src/utils.c
+)
+target_include_directories(MultiBootKernelPatcher PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/inc
+)
 if (MSVC)
     set_property(TARGET MultiBootKernelPatcher PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif ()
 target_link_libraries(MultiBootKernelPatcher PRIVATE ${INIH_TARGET})
-add_executable(HDRTool HDRTool.c utils.c)
+add_executable(HDRTool src/HDRTool.c src/utils.c)
+target_include_directories(HDRTool PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/inc
+)
 if (MSVC)
     set_property(TARGET HDRTool PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
