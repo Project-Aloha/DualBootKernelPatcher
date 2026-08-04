@@ -13,17 +13,6 @@ Shim runtime, and multiple bootable images from one INI configuration.
     + Git
     + CMake
 
-  - Install dependencies
-    + Linux (Debian / Ubuntu)
-      ```sh
-      sudo apt install build-essential cmake gcc-aarch64-linux-gnu git
-      ```
-    + Windows
-      Install CMake and a Visual Studio C compiler. The inih dependency is
-      built from the checked-out `lib/inih` submodule.
-    + macOS
-      Install CMake and Xcode Command Line Tools. The inih dependency is built
-      from the checked-out `lib/inih` submodule.
   - Clone this repo
     ```
     git clone https://github.com/Project-Aloha/DualBootKernelPatcher
