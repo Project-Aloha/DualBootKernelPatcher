@@ -19,7 +19,6 @@ jobs:
             os: windows-latest
             arch: x64
             cmake_arch: x64
-            vcpkg_triplet: x64-windows-static
             build_shim_loader: 'OFF'
             executable_suffix: .exe
             executable_directory: Release
@@ -27,7 +26,6 @@ jobs:
             os: windows-11-arm
             arch: arm64
             cmake_arch: ARM64
-            vcpkg_triplet: arm64-windows-static
             build_shim_loader: 'OFF'
             executable_suffix: .exe
             executable_directory: Release
@@ -55,20 +53,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libinih-dev pkg-config
+          sudo apt-get install --yes build-essential cmake git
 
       - name: Install ShimLoader toolchain
         if: matrix.build_shim_loader == 'ON'
         run: sudo apt-get install --yes binutils-aarch64-linux-gnu
-
-      - name: Install macOS dependencies
-        if: runner.os == 'macOS'
-        run: brew install inih pkg-config
 
       - name: Configure CMake on Windows
         if: runner.os == 'Windows'
@@ -77,8 +73,6 @@ jobs:
           -B "${{ github.workspace }}/build"
           -A ${{ matrix.cmake_arch }}
           -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
-          -DVCPKG_TARGET_TRIPLET=${{ matrix.vcpkg_triplet }}
           -DBUILD_SHIM_LOADER=${{ matrix.build_shim_loader }}
 
       - name: Configure CMake on Unix

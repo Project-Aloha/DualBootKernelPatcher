@@ -9,38 +9,18 @@ if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
 endif ()
 
-find_package(unofficial-inih CONFIG QUIET)
-if (TARGET unofficial::inih::libinih)
-    set(INIH_TARGET unofficial::inih::libinih)
-else ()
-    find_package(PkgConfig QUIET)
-    if (PkgConfig_FOUND)
-        pkg_check_modules(INIH QUIET inih)
-    endif ()
-    if (INIH_FOUND)
-        find_file(INIH_STATIC_LIBRARY
-            NAMES libinih.a inih.a
-            PATHS ${INIH_LIBRARY_DIRS}
-            NO_DEFAULT_PATH
-        )
-        if (NOT INIH_STATIC_LIBRARY)
-            message(FATAL_ERROR
-                "inih was found, but its static library libinih.a was not found. "
-                "Install the inih development package with static libraries enabled.")
-        endif ()
-        add_library(inih_static STATIC IMPORTED)
-        set_target_properties(inih_static PROPERTIES
-            IMPORTED_LOCATION "${INIH_STATIC_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${INIH_INCLUDE_DIRS}"
-        )
-        set(INIH_TARGET inih_static)
-    else ()
-        message(FATAL_ERROR
-            "inih was not found. Install libinih-dev on Debian/Ubuntu, "
-            "inih-devel on Fedora, or configure CMake with the vcpkg "
-            "toolchain; vcpkg.json declares the inih dependency.")
-    endif ()
+if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/lib/inih/ini.c)
+    message(FATAL_ERROR
+        "The inih submodule is missing. Run: git submodule update --init --recursive")
 endif ()
+
+add_library(inih_static STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/inih/ini.c
+)
+target_include_directories(inih_static PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/inih
+)
+set(INIH_TARGET inih_static)
 
 if (MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
