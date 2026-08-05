@@ -35,8 +35,7 @@ Shim runtime, and multiple bootable images from one INI configuration.
     MultiBootKernelPatcher Config/Shim.Sample.cfg
     ```
   - Notice
-    + ShimLoader binaries are generated under `output/ShimLoader/`.
-    + Simplified assembly Shim binaries are generated under `output/Shims/`.
+    + Device Shim blobs are generated under `output/Shims/`.
 
 ## See More
   - You can go to our [document website](https://aloha.firmware.icu/) to get more infomation about the Multi-Boot Kernel Patcher.

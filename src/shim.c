@@ -35,7 +35,8 @@ static void write_le64(uint8_t *buffer, uint64_t value) {
 }
 
 static bool align_up_size(size_t value, size_t alignment, size_t *result) {
-    if (alignment == 0 || value > SIZE_MAX - (alignment - 1))
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0 ||
+        value > SIZE_MAX - (alignment - 1))
         return false;
     *result = (value + alignment - 1) & ~(alignment - 1);
     return true;
@@ -60,12 +61,12 @@ static bool inspect_arm64_image(const FileContent *file, Arm64ImageInfo *info) {
     return true;
 }
 
-static bool align_image_offset(size_t minimum,
+static bool align_linux_offset(size_t minimum,
                                uint64_t primaryTextOffset,
                                uint64_t imageTextOffset,
                                size_t alignment,
                                size_t *result) {
-    const size_t mask = SHIM_KERNEL_ALIGNMENT - 1;
+    const size_t mask = SHIM_LINUX_ALIGNMENT - 1;
     size_t requiredResidue =
         ((size_t)imageTextOffset - (size_t)primaryTextOffset) & mask;
     size_t adjustment = (requiredResidue - (minimum & mask)) & mask;
@@ -93,27 +94,41 @@ static bool resize_output(FileContent *output, size_t newSize) {
     return true;
 }
 
-static bool initialize_output(const FileContent *primary,
-                              const Arm64ImageInfo *primaryInfo,
-                              size_t primarySlot,
-                              const FileContent *shim,
-                              const FileContent *loader,
-                              FileContent *output) {
-    if (primaryInfo->headerOffset > SIZE_MAX - primarySlot ||
-        primaryInfo->headerOffset + primarySlot > SIZE_MAX - shim->fileSize ||
-        loader->fileSize > primarySlot)
+static bool is_executable_type(uint32_t type) {
+    return type == SHIM_ENTRY_TYPE_LINUX ||
+           type == SHIM_ENTRY_TYPE_FREE_EXEC ||
+           type == SHIM_ENTRY_TYPE_SHIM;
+}
+
+static bool inspect_typed_blob(const FileContent *file,
+                               const ShimImageConfig *image) {
+    if (image->type == SHIM_ENTRY_TYPE_DTB) {
+        static const uint8_t fdtMagic[] = {0xd0, 0x0d, 0xfe, 0xed};
+        if (file->fileSize < sizeof(fdtMagic) ||
+            memcmp(file->fileBuffer, fdtMagic, sizeof(fdtMagic)) != 0) {
+            printf("Error: [%s] is not a flattened device tree blob.\n",
+                   image->section);
+            return false;
+        }
+    } else if (image->type == SHIM_ENTRY_TYPE_MANIFEST) {
+        if (file->fileSize < sizeof(ShimManifestHeader) ||
+            memcmp(file->fileBuffer, SHIM_MANIFEST_MAGIC, 8) != 0 ||
+            read_le32(file->fileBuffer + 8) != SHIM_MANIFEST_VERSION) {
+            printf("Error: [%s] is not a v%u Shim manifest.\n",
+                   image->section, SHIM_MANIFEST_VERSION);
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool patch_kernel_entry(uint8_t *kernelHeader, size_t shimOffset) {
+    if ((shimOffset & (SHIM_BRANCH_ALIGNMENT - 1)) != 0 ||
+        shimOffset >= (size_t)SHIM_BRANCH_MAX_OFFSET) {
+        printf("Error: Shim is outside the ARM64 BL range.\n");
         return false;
+    }
 
-    output->fileSize = primaryInfo->headerOffset + primarySlot + shim->fileSize;
-    output->fileBuffer = calloc(1, output->fileSize);
-    if (output->fileBuffer == NULL)
-        return false;
-
-    memcpy(output->fileBuffer, primary->fileBuffer, primary->fileSize);
-    memcpy(output->fileBuffer + primaryInfo->headerOffset + primarySlot,
-           shim->fileBuffer, shim->fileSize);
-
-    uint8_t *kernelHeader = output->fileBuffer + primaryInfo->headerOffset;
     uint32_t firstInstruction = read_le32(kernelHeader);
     uint32_t secondInstruction = read_le32(kernelHeader + 4);
     bool firstIsBranch = (firstInstruction & 0xfc000000U) == 0x14000000U;
@@ -128,87 +143,60 @@ static bool initialize_output(const FileContent *primary,
         return false;
     }
 
-    write_le32(kernelHeader, 0x14000010U);
-    memcpy(kernelHeader + 0x40, loader->fileBuffer + 0x40,
-           loader->fileSize - 0x40);
-    write_le64(kernelHeader + 0x30, primarySlot);
+    uint32_t branchImmediate = (uint32_t)(shimOffset >> 2);
+    write_le32(kernelHeader, 0x94000000U | branchImmediate);
     return true;
 }
 
 int PackShim(const ShimPackConfig *config) {
-    size_t extraImageCount = config->imageCount - 1;
     const ShimImageConfig *baseImage =
         &config->images[config->baseImageIndex];
+    bool writeManifest = config->manifest.present;
     int status = -EINVAL;
 
-    FileContent primary = {0};
-    FileContent shim = {0};
-    FileContent loader = {0};
-    FileContent output = {0};
+    FileContent primary = {.filePath = baseImage->path};
+    FileContent shim = {.filePath = config->shim};
+    FileContent output = {.filePath = config->output};
 
-    primary.filePath = baseImage->path;
-    shim.filePath = config->shim;
-    output.filePath = config->output;
-    loader.filePath = config->loader;
-
-    if (!load_file(&primary) || !load_file(&shim) || !load_file(&loader))
+    if (!load_file(&primary) || !load_file(&shim))
         goto cleanup;
+    if (shim.fileSize == 0) {
+        printf("Error: Shim must be a non-empty blob.\n");
+        goto cleanup;
+    }
 
     Arm64ImageInfo primaryInfo = {0};
-    Arm64ImageInfo shimInfo = {0};
     if (!inspect_arm64_image(&primary, &primaryInfo)) {
         printf("Error: Base image is not an ARM64 Linux Image.\n");
         goto cleanup;
     }
-    if (!inspect_arm64_image(&shim, &shimInfo) || shimInfo.headerOffset != 0) {
-        printf("Error: Shim is not a raw ARM64 Image.\n");
-        goto cleanup;
-    }
-    if (shimInfo.imageSize == 0 || shim.fileSize != shimInfo.imageSize) {
-        printf("Error: Shim file size must match its non-zero Image size.\n");
-        goto cleanup;
-    }
-    bool isSimpleShim =
-        memcmp(shim.fileBuffer + 8, SIMPLE_SHIM_MAGIC,
-               sizeof(SIMPLE_SHIM_MAGIC)) == 0;
-    if (isSimpleShim) {
-        if (config->defaultEntry != 0 || config->timeoutMs != 0) {
-            printf("Error: Simplified assembly Shim requires the base image "
-                   "as Default and Timeout=0.\n");
-            goto cleanup;
-        }
-        if (config->imageCount != 2) {
-            printf("Error: Simplified assembly Shim requires exactly one "
-                   "base image and one CopyTo image.\n");
-            goto cleanup;
-        }
-        for (size_t index = 0; index < config->imageCount; index++) {
-            if (index != config->baseImageIndex &&
-                !config->images[index].hasCopyAddress) {
-                printf("Error: Simplified assembly Shim requires its second "
-                       "image to set CopyTo.\n");
-                goto cleanup;
-            }
-        }
-    }
-    if (loader.fileSize <= 0x40 ||
-        memcmp(loader.fileBuffer + 8, SHIM_LOADER_MAGIC,
-               sizeof(SHIM_LOADER_MAGIC)) != 0) {
-        printf("Error: Invalid ShimLoader image.\n");
-        goto cleanup;
-    }
 
     size_t primarySlot = primaryInfo.payloadSize;
-    if (primaryInfo.imageSize > primarySlot)
+    if (primaryInfo.imageSize > primarySlot) {
+        if (primaryInfo.imageSize > SIZE_MAX) {
+            printf("Error: Base image is too large.\n");
+            goto cleanup;
+        }
         primarySlot = (size_t)primaryInfo.imageSize;
-    if (!align_up_size(primarySlot, 0x1000, &primarySlot) ||
-        primarySlot > SIZE_MAX - primaryInfo.headerOffset) {
-        printf("Error: Base image is too large.\n");
+    }
+    if (!align_up_size(primarySlot, SHIM_BRANCH_ALIGNMENT, &primarySlot) ||
+        primarySlot >= (size_t)SHIM_BRANCH_MAX_OFFSET ||
+        primaryInfo.headerOffset > SIZE_MAX - primarySlot ||
+        primaryInfo.headerOffset + primarySlot > SIZE_MAX - shim.fileSize) {
+        printf("Error: Base image cannot reach the attached Shim with BL.\n");
         goto cleanup;
     }
 
-    if (!initialize_output(&primary, &primaryInfo, primarySlot, &shim,
-                           &loader, &output))
+    output.fileSize = primaryInfo.headerOffset + primarySlot + shim.fileSize;
+    output.fileBuffer = calloc(1, output.fileSize);
+    if (output.fileBuffer == NULL)
+        goto cleanup;
+    memcpy(output.fileBuffer, primary.fileBuffer, primary.fileSize);
+    memcpy(output.fileBuffer + primaryInfo.headerOffset + primarySlot,
+           shim.fileBuffer, shim.fileSize);
+
+    uint8_t *kernelHeader = output.fileBuffer + primaryInfo.headerOffset;
+    if (!patch_kernel_entry(kernelHeader, primarySlot))
         goto cleanup;
 
     ShimManifest manifest = {0};
@@ -216,15 +204,17 @@ int PackShim(const ShimPackConfig *config) {
     manifest.header.version = SHIM_MANIFEST_VERSION;
     manifest.header.headerSize = sizeof(ShimManifestHeader);
     manifest.header.entrySize = sizeof(ShimManifestEntry);
-    manifest.header.entryCount = (uint32_t)extraImageCount + 1;
+    manifest.header.entryCount = (uint32_t)config->imageCount;
     manifest.header.defaultEntry = config->defaultEntry;
     manifest.header.timeoutMs = config->timeoutMs;
 
-    memcpy(manifest.entries[0].name, baseImage->name, strlen(baseImage->name) + 1);
-    manifest.entries[0].offset = 0;
-    manifest.entries[0].size = primaryInfo.payloadSize;
-    manifest.entries[0].type = SHIM_ENTRY_TYPE_LINUX;
-    manifest.entries[0].flags = SHIM_ENTRY_FLAG_BASE_IMAGE;
+    ShimManifestEntry *baseEntry = &manifest.entries[0];
+    memcpy(baseEntry->name, baseImage->name, strlen(baseImage->name) + 1);
+    baseEntry->type = SHIM_ENTRY_TYPE_LINUX;
+    baseEntry->entryOffset = baseImage->entryOffset;
+    baseEntry->offset = 0;
+    baseEntry->size = primaryInfo.payloadSize;
+    baseEntry->flags = SHIM_ENTRY_FLAG_BASE_IMAGE;
 
     size_t manifestIndex = 1;
     for (size_t index = 0; index < config->imageCount; index++) {
@@ -235,6 +225,10 @@ int PackShim(const ShimPackConfig *config) {
         FileContent extra = {.filePath = image->path};
         if (!load_file(&extra))
             goto cleanup;
+        if (!inspect_typed_blob(&extra, image)) {
+            free(extra.fileBuffer);
+            goto cleanup;
+        }
         if (image->hasCopyAddress && extra.fileSize > image->copySizeMax) {
             printf("Error: [%s] image size 0x%zx exceeds CopySizeMax "
                    "0x%llx.\n", image->section, extra.fileSize,
@@ -242,51 +236,63 @@ int PackShim(const ShimPackConfig *config) {
             free(extra.fileBuffer);
             goto cleanup;
         }
+        if (image->hasCopyAddress &&
+            image->copyAddress > UINT64_MAX - extra.fileSize) {
+            printf("Error: Copy address range overflows: %s\n",
+                   image->section);
+            free(extra.fileBuffer);
+            goto cleanup;
+        }
 
         size_t runtimeSize = output.fileSize - primaryInfo.headerOffset;
         size_t imageOffset = 0;
-        size_t imageSlot = 0;
         size_t payloadOffset = 0;
         size_t payloadSize = extra.fileSize;
+        size_t imageSlot = extra.fileSize;
         Arm64ImageInfo extraInfo = {0};
 
-        if (image->hasCopyAddress) {
-            if (image->copyAddress > UINT64_MAX - extra.fileSize) {
-                printf("Error: Copy address range overflows: %s\n",
-                       image->section);
-                free(extra.fileBuffer);
-                goto cleanup;
-            }
-            if (!align_up_size(runtimeSize, (size_t)image->alignment,
-                               &imageOffset)) {
-                free(extra.fileBuffer);
-                goto cleanup;
-            }
-            imageSlot = extra.fileSize;
-        } else {
+        if (image->type == SHIM_ENTRY_TYPE_LINUX) {
             if (!inspect_arm64_image(&extra, &extraInfo)) {
-                printf("Error: Image without CopyTo is not an ARM64 Linux "
-                       "Image: %s\n", extra.filePath);
+                printf("Error: [%s] is not an ARM64 Linux Image.\n",
+                       image->section);
                 free(extra.fileBuffer);
                 goto cleanup;
             }
             payloadOffset = extraInfo.headerOffset;
             payloadSize = extraInfo.payloadSize;
             imageSlot = extraInfo.payloadSize;
-            if (extraInfo.imageSize > imageSlot)
+            if (extraInfo.imageSize > imageSlot) {
+                if (extraInfo.imageSize > SIZE_MAX) {
+                    free(extra.fileBuffer);
+                    goto cleanup;
+                }
                 imageSlot = (size_t)extraInfo.imageSize;
-            if (!align_image_offset(runtimeSize, primaryInfo.textOffset,
-                             extraInfo.textOffset,
-                             (size_t)image->alignment, &imageOffset) ||
+            }
+            if (!align_linux_offset(runtimeSize, primaryInfo.textOffset,
+                                    extraInfo.textOffset,
+                                    (size_t)image->alignment, &imageOffset) ||
                 !align_up_size(imageSlot, 0x1000, &imageSlot)) {
-                  printf("Error: [%s] cannot satisfy Align=0x%llx and ARM64 "
-                      "Image text_offset constraints.\n", image->section,
-                      (unsigned long long)image->alignment);
+                printf("Error: [%s] cannot satisfy Linux Image alignment.\n",
+                       image->section);
                 free(extra.fileBuffer);
                 goto cleanup;
             }
+        } else if (!align_up_size(runtimeSize, (size_t)image->alignment,
+                                  &imageOffset)) {
+            printf("Error: [%s] image alignment overflows.\n", image->section);
+            free(extra.fileBuffer);
+            goto cleanup;
         }
 
+        if (is_executable_type(image->type) &&
+            (image->entryOffset > payloadSize ||
+             payloadSize - (size_t)image->entryOffset < 4 ||
+             (image->entryOffset & (SHIM_BRANCH_ALIGNMENT - 1)) != 0)) {
+            printf("Error: [%s] EntryOffset is outside the executable image.\n",
+                   image->section);
+            free(extra.fileBuffer);
+            goto cleanup;
+        }
         if (imageOffset > SIZE_MAX - imageSlot ||
             primaryInfo.headerOffset > SIZE_MAX - imageOffset - imageSlot ||
             !resize_output(&output,
@@ -294,109 +300,77 @@ int PackShim(const ShimPackConfig *config) {
             free(extra.fileBuffer);
             goto cleanup;
         }
-
         memcpy(output.fileBuffer + primaryInfo.headerOffset + imageOffset,
                extra.fileBuffer + payloadOffset, payloadSize);
 
         ShimManifestEntry *entry = &manifest.entries[manifestIndex++];
         memcpy(entry->name, image->name, strlen(image->name) + 1);
+        entry->type = image->type;
+        entry->entryOffset = image->entryOffset;
         entry->offset = imageOffset;
         entry->size = payloadSize;
         if (image->hasCopyAddress) {
-            entry->type = SHIM_ENTRY_TYPE_EXECUTABLE;
-            entry->flags = SHIM_ENTRY_FLAG_COPY;
+            entry->flags |= SHIM_ENTRY_FLAG_COPY;
             entry->loadAddress = image->copyAddress;
-        } else {
-            entry->type = SHIM_ENTRY_TYPE_LINUX;
         }
         free(extra.fileBuffer);
     }
 
-    if (isSimpleShim) {
-        ShimManifestEntry *payload = &manifest.entries[1];
-        uint8_t *shimHeader = output.fileBuffer + primaryInfo.headerOffset +
-                              primarySlot;
-        write_le64(shimHeader + SIMPLE_SHIM_PAYLOAD_OFFSET, payload->offset);
-        write_le64(shimHeader + SIMPLE_SHIM_COPY_ADDRESS_OFFSET,
-               payload->loadAddress);
-        write_le64(shimHeader + SIMPLE_SHIM_COPY_SIZE_OFFSET, payload->size);
-
-        uint8_t *kernelHeader = output.fileBuffer + primaryInfo.headerOffset;
-        write_le64(kernelHeader + 0x20, 0);
-        write_le64(kernelHeader + 0x28, 0);
-
-        if (primaryInfo.headerOffset != 0) {
-            size_t imageSize = output.fileSize - primaryInfo.headerOffset;
-            if (imageSize > UINT32_MAX) {
-                printf("Error: UNCOMPRESSED_IMG payload exceeds 32-bit size.\n");
-                goto cleanup;
-            }
-            write_le32(output.fileBuffer + 0x10, (uint32_t)imageSize);
-        }
-        if (write_file_content(&output) != 0) {
-            printf("Error: Failed to write simplified Shim image.\n");
+    size_t manifestOffset = 0;
+    size_t manifestSize = 0;
+    if (writeManifest) {
+        manifestSize = sizeof(ShimManifestHeader) +
+            manifest.header.entryCount * sizeof(ShimManifestEntry);
+        size_t oldRuntimeSize = output.fileSize - primaryInfo.headerOffset;
+        if (!align_up_size(oldRuntimeSize, sizeof(uint64_t), &manifestOffset)) {
+            printf("Error: Failed to align Shim manifest.\n");
             goto cleanup;
         }
-
-        printf("Simplified Shim image packed successfully.\n");
-        printf("  Payload:            offset 0x%llx, CopyTo 0x%llx, "
-               "size 0x%llx\n",
-               (unsigned long long)payload->offset,
-               (unsigned long long)payload->loadAddress,
-               (unsigned long long)payload->size);
-        printf("  Output size:        0x%zx\n", output.fileSize);
-        status = 0;
-        goto cleanup;
+        size_t manifestFileOffset = primaryInfo.headerOffset + manifestOffset;
+        if (manifestSize > SHIM_MANIFEST_MAX_SIZE ||
+            manifestSize > SIZE_MAX - manifestFileOffset ||
+            !resize_output(&output, manifestFileOffset + manifestSize)) {
+            printf("Error: Failed to append Shim manifest.\n");
+            goto cleanup;
+        }
+        manifest.header.imageSize = manifestOffset + manifestSize;
+        memcpy(output.fileBuffer + manifestFileOffset, &manifest, manifestSize);
     }
 
-    size_t manifestSize = sizeof(ShimManifestHeader) +
-                          manifest.header.entryCount * sizeof(ShimManifestEntry);
-    size_t manifestOffset = output.fileSize - primaryInfo.headerOffset;
-    size_t oldOutputSize = output.fileSize;
-    if (manifestSize > SHIM_MANIFEST_MAX_SIZE ||
-        manifestSize > SIZE_MAX - oldOutputSize ||
-        !resize_output(&output, oldOutputSize + manifestSize)) {
-        printf("Error: Failed to append Shim manifest.\n");
-        goto cleanup;
-    }
-    manifest.header.imageSize = manifestOffset + manifestSize;
-    memcpy(output.fileBuffer + oldOutputSize, &manifest, manifestSize);
-
-    uint8_t *kernelHeader = output.fileBuffer + primaryInfo.headerOffset;
+    size_t runtimeImageSize = output.fileSize - primaryInfo.headerOffset;
+    kernelHeader = output.fileBuffer + primaryInfo.headerOffset;
+    write_le64(kernelHeader + 0x10, runtimeImageSize);
     write_le64(kernelHeader + 0x20, manifestOffset);
     write_le64(kernelHeader + 0x28, manifestSize);
+    write_le64(kernelHeader + 0x30, primarySlot);
 
     if (primaryInfo.headerOffset != 0) {
-        if (manifest.header.imageSize > UINT32_MAX) {
+        if (runtimeImageSize > UINT32_MAX) {
             printf("Error: UNCOMPRESSED_IMG payload exceeds 32-bit size.\n");
             goto cleanup;
         }
-        write_le32(output.fileBuffer + 0x10, (uint32_t)manifest.header.imageSize);
+        write_le32(output.fileBuffer + 0x10, (uint32_t)runtimeImageSize);
     }
-
     if (write_file_content(&output) != 0) {
-        printf("Error: Failed to write Shim image.\n");
+        printf("Error: Failed to write packed image.\n");
         goto cleanup;
     }
 
     printf("Shim image packed successfully.\n");
     printf("  Base image slot:    0x%zx\n", primarySlot);
-    printf("  Shim slot:          0x%zx\n", shim.fileSize);
-        printf("  Manifest blob:      offset 0x%zx, size 0x%zx\n",
-            manifestOffset, manifestSize);
-    for (uint32_t index = 0; index < manifest.header.entryCount; index++)
-        printf("  Image %u:            %s @ 0x%llx (0x%llx bytes)\n",
-               index + 1, manifest.entries[index].name,
-               (unsigned long long)manifest.entries[index].offset,
-               (unsigned long long)manifest.entries[index].size);
-    printf("  Output size:        0x%llx\n",
-           (unsigned long long)manifest.header.imageSize);
+    printf("  Shim blob:          offset 0x%zx, size 0x%zx\n",
+           primarySlot, shim.fileSize);
+    if (writeManifest)
+        printf("  Manifest v%u:       offset 0x%zx, size 0x%zx\n",
+               SHIM_MANIFEST_VERSION, manifestOffset, manifestSize);
+    else
+        printf("  Manifest:           omitted\n");
+    printf("  Output size:        0x%zx\n", runtimeImageSize);
     status = 0;
 
 cleanup:
     free(primary.fileBuffer);
     free(shim.fileBuffer);
-    free(loader.fileBuffer);
     free(output.fileBuffer);
     return status;
 }

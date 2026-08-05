@@ -19,35 +19,35 @@ jobs:
             os: windows-latest
             arch: x64
             cmake_arch: x64
-            build_shim_loader: 'OFF'
+            build_shims: 'OFF'
             executable_suffix: .exe
             executable_directory: Release
           - name: Windows ARM64
             os: windows-11-arm
             arch: arm64
             cmake_arch: ARM64
-            build_shim_loader: 'OFF'
+            build_shims: 'OFF'
             executable_suffix: .exe
             executable_directory: Release
           - name: Linux x64
             os: ubuntu-latest
             arch: x64
             c_compiler: clang
-            build_shim_loader: 'ON'
+            build_shims: 'ON'
             executable_suffix: ''
             executable_directory: .
           - name: Linux ARM64
             os: ubuntu-24.04-arm
             arch: arm64
             c_compiler: clang
-            build_shim_loader: 'OFF'
+            build_shims: 'OFF'
             executable_suffix: ''
             executable_directory: .
           - name: macOS x64
             os: macos-15-intel
             arch: x64
             c_compiler: clang
-            build_shim_loader: 'OFF'
+            build_shims: 'OFF'
             executable_suffix: ''
             executable_directory: .
 
@@ -62,8 +62,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes build-essential cmake git
 
-      - name: Install ShimLoader toolchain
-        if: matrix.build_shim_loader == 'ON'
+      - name: Install ARM64 Shim toolchain
+        if: matrix.build_shims == 'ON'
         run: sudo apt-get install --yes binutils-aarch64-linux-gnu
 
       - name: Configure CMake on Windows
@@ -73,7 +73,7 @@ jobs:
           -B "${{ github.workspace }}/build"
           -A ${{ matrix.cmake_arch }}
           -DCMAKE_BUILD_TYPE=Release
-          -DBUILD_SHIM_LOADER=${{ matrix.build_shim_loader }}
+          -DBUILD_SHIMS=${{ matrix.build_shims }}
 
       - name: Configure CMake on Unix
         if: runner.os != 'Windows'
@@ -82,7 +82,7 @@ jobs:
           -B "${{ github.workspace }}/build"
           -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
           -DCMAKE_BUILD_TYPE=Release
-          -DBUILD_SHIM_LOADER=${{ matrix.build_shim_loader }}
+          -DBUILD_SHIMS=${{ matrix.build_shims }}
 
       - name: Build host tools
         run: >-
@@ -90,12 +90,12 @@ jobs:
           --config Release
           --target MultiBootKernelPatcher HDRTool
 
-      - name: Build ShimLoader
-        if: matrix.build_shim_loader == 'ON'
+      - name: Build Shims
+        if: matrix.build_shims == 'ON'
         run: >-
           cmake --build "${{ github.workspace }}/build"
           --config Release
-          --target ShimLoader_BIN Shims
+          --target Shims
 
       - name: Stage host tools
         shell: bash
@@ -111,16 +111,8 @@ jobs:
           path: artifacts/tools
           if-no-files-found: error
 
-      - name: Upload ShimLoader
-        if: matrix.build_shim_loader == 'ON'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ShimLoader
-          path: build/ShimLoader/ShimLoader.bin
-          if-no-files-found: error
-
       - name: Upload simplified Shims
-        if: matrix.build_shim_loader == 'ON'
+        if: matrix.build_shims == 'ON'
         uses: actions/upload-artifact@v4
         with:
           name: Shims
@@ -128,7 +120,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload configs
-        if: matrix.build_shim_loader == 'ON'
+        if: matrix.build_shims == 'ON'
         uses: actions/upload-artifact@v4
         with:
           name: Configs

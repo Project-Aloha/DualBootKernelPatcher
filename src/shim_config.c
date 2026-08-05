@@ -69,6 +69,28 @@ static bool parse_bool(const char *value, int *result) {
     return false;
 }
 
+static bool parse_image_type(const char *value, uint32_t *result) {
+    static const struct {
+        const char *name;
+        uint32_t type;
+    } types[] = {
+        {"Linux", SHIM_ENTRY_TYPE_LINUX},
+        {"FreeExec", SHIM_ENTRY_TYPE_FREE_EXEC},
+        {"Shim", SHIM_ENTRY_TYPE_SHIM},
+        {"Blob", SHIM_ENTRY_TYPE_BLOB},
+        {"DTB", SHIM_ENTRY_TYPE_DTB},
+        {"Manifest", SHIM_ENTRY_TYPE_MANIFEST},
+    };
+
+    for (size_t index = 0; index < sizeof(types) / sizeof(types[0]); index++) {
+        if (strcmp(value, types[index].name) == 0) {
+            *result = types[index].type;
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool set_once(char *destination, size_t size, const char *value) {
     return destination[0] == '\0' && copy_text(destination, size, value);
 }
@@ -106,6 +128,13 @@ static int config_handler(void *user,
     ConfigParser *parser = user;
     bool valid = false;
 
+    if (parser->config.manifest.present &&
+        strcmp(section, "Manifest") != 0) {
+        snprintf(parser->error, sizeof(parser->error),
+                 "[Manifest] must be the final section");
+        return 0;
+    }
+
     if (strcmp(section, "Pack") == 0) {
         if (strcmp(name, "Shim") == 0)
             valid = set_path_once(parser->config.shim,
@@ -113,15 +142,19 @@ static int config_handler(void *user,
         else if (strcmp(name, "Output") == 0)
             valid = set_path_once(parser->config.output,
                                   sizeof(parser->config.output), parser, value);
-        else if (strcmp(name, "Loader") == 0)
-            valid = set_path_once(parser->config.loader,
-                                  sizeof(parser->config.loader), parser, value);
         else if (strcmp(name, "Default") == 0)
             valid = set_once(parser->config.defaultSection,
                              sizeof(parser->config.defaultSection), value);
         else if (strcmp(name, "Timeout") == 0)
             valid = parse_u32(value, &parser->config.timeoutMs);
-    } else if (strncmp(section, "Image-", 6) == 0 && section[6] != '\0') {
+    } else if (strcmp(section, "Manifest") == 0) {
+        parser->config.manifest.present = 1;
+        if (strcmp(name, "Type") == 0 && !parser->config.manifest.hasType) {
+            valid = parse_image_type(value, &parser->config.manifest.type);
+            parser->config.manifest.hasType = valid;
+        }
+    } else if (strcmp(section, "Image") == 0 ||
+               (strncmp(section, "Image-", 6) == 0 && section[6] != '\0')) {
         ShimImageConfig *image = find_or_add_image(parser, section);
         if (image != NULL) {
             if (strcmp(name, "Name") == 0)
@@ -129,6 +162,10 @@ static int config_handler(void *user,
             else if (strcmp(name, "Path") == 0)
                 valid = set_path_once(image->path, sizeof(image->path),
                                       parser, value);
+            else if (strcmp(name, "Type") == 0 && !image->hasType) {
+                valid = parse_image_type(value, &image->type);
+                image->hasType = valid;
+            }
             else if (strcmp(name, "BaseImage") == 0 && image->baseImage == -1)
                 valid = parse_bool(value, &image->baseImage);
             else if (strcmp(name, "CopyTo") == 0 &&
@@ -143,6 +180,10 @@ static int config_handler(void *user,
                        !image->hasAlignment) {
                 valid = parse_u64(value, &image->alignment);
                 image->hasAlignment = valid;
+            } else if (strcmp(name, "EntryOffset") == 0 &&
+                       !image->hasEntryOffset) {
+                valid = parse_u64(value, &image->entryOffset);
+                image->hasEntryOffset = valid;
             }
         }
     }
@@ -176,9 +217,8 @@ static bool validate_config(ConfigParser *parser,
                             size_t *baseImageIndex,
                             size_t *defaultIndex) {
     ShimPackConfig *config = &parser->config;
-    if (config->shim[0] == '\0' || config->output[0] == '\0' ||
-        config->loader[0] == '\0' || config->defaultSection[0] == '\0') {
-        printf("Error: [Pack] requires Shim, Output, Loader and Default.\n");
+    if (config->shim[0] == '\0' || config->output[0] == '\0') {
+        printf("Error: [Pack] requires Shim and Output.\n");
         return false;
     }
     if (config->imageCount == 0) {
@@ -191,23 +231,33 @@ static bool validate_config(ConfigParser *parser,
     for (size_t index = 0; index < config->imageCount; index++) {
         ShimImageConfig *image = &config->images[index];
         if (image->name[0] == '\0' || image->path[0] == '\0' ||
-            image->baseImage == -1) {
-            printf("Error: [%s] requires Name, Path and BaseImage.\n",
+            !image->hasType || image->baseImage == -1) {
+            printf("Error: [%s] requires Name, Path, Type and BaseImage.\n",
                    image->section);
             return false;
         }
         if (!image->hasAlignment)
             image->alignment = 4;
-        if (image->alignment < 4 ||
-            image->alignment > SHIM_KERNEL_ALIGNMENT ||
+        if (image->alignment < SHIM_BRANCH_ALIGNMENT ||
+            image->alignment > UINT32_MAX ||
             (image->alignment & (image->alignment - 1)) != 0) {
             printf("Error: [%s] Align must be a power of two from 4 to "
-                   "0x%x.\n", image->section, SHIM_KERNEL_ALIGNMENT);
+                   "0xffffffff.\n", image->section);
             return false;
         }
         if (image->baseImage) {
+            if (image->type != SHIM_ENTRY_TYPE_LINUX) {
+                printf("Error: Base image [%s] must set Type=Linux.\n",
+                       image->section);
+                return false;
+            }
             if (image->hasCopyAddress) {
                 printf("Error: Base image [%s] cannot set CopyTo.\n",
+                       image->section);
+                return false;
+            }
+            if (image->entryOffset != 0) {
+                printf("Error: Base image [%s] cannot set EntryOffset.\n",
                        image->section);
                 return false;
             }
@@ -240,10 +290,31 @@ static bool validate_config(ConfigParser *parser,
                    image->section);
             return false;
         }
-        if (strcmp(image->section, config->defaultSection) == 0) {
+        bool executable = image->type == SHIM_ENTRY_TYPE_LINUX ||
+                          image->type == SHIM_ENTRY_TYPE_FREE_EXEC ||
+                          image->type == SHIM_ENTRY_TYPE_SHIM;
+        if (image->type == SHIM_ENTRY_TYPE_MANIFEST) {
+            printf("Error: [%s] must be configured as the [Manifest] "
+                   "section.\n", image->section);
+            return false;
+        }
+        if (!executable && image->hasEntryOffset) {
+            printf("Error: [%s] Type does not allow EntryOffset.\n",
+                   image->section);
+            return false;
+        }
+        if (config->defaultSection[0] != '\0' &&
+            strcmp(image->section, config->defaultSection) == 0) {
             *defaultIndex = index;
             defaultFound = true;
         }
+    }
+
+    if (config->manifest.present &&
+        (!config->manifest.hasType ||
+         config->manifest.type != SHIM_ENTRY_TYPE_MANIFEST)) {
+        printf("Error: [Manifest] must set Type=Manifest.\n");
+        return false;
     }
 
     if (baseImageCount != 1) {
@@ -251,6 +322,10 @@ static bool validate_config(ConfigParser *parser,
         return false;
     }
     config->baseImageIndex = *baseImageIndex;
+    if (config->defaultSection[0] == '\0') {
+        *defaultIndex = *baseImageIndex;
+        defaultFound = true;
+    }
     if (!defaultFound) {
         printf("Error: Default must name an [Image-*] section.\n");
         return false;

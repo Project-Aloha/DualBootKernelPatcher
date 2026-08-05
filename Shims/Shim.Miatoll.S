@@ -6,7 +6,7 @@ _ShimStart:
     mov     x20, x1
     mov     x21, x2
     mov     x22, x3
-    mov     x23, x4
+    mov     x23, x30
     movz    x4, #0x6000
     movk    x4, #0xE60, lsl #16     // Store 0xE606000 to x4, which is address of 0xC0 spmi channel
     movz    x5, #0x0081

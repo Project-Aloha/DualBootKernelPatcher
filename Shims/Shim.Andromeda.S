@@ -6,7 +6,7 @@ _ShimStart:
     mov     x20, x1
     mov     x21, x2
     mov     x22, x3
-    mov     x23, x4
+    mov     x23, x30
     movz    x4, #0x9000
     movk    x4, #0x392, lsl #16     // Store 0x3929000 to x4, which is io control of gpio 41.
     ldr     w5, [x4]

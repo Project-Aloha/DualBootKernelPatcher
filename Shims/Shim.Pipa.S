@@ -6,7 +6,7 @@ _ShimStart:
     mov     x20, x1
     mov     x21, x2
     mov     x22, x3
-    mov     x23, x4
+    mov     x23, x30
     movz    x4, #0xe004
     movk    x4, #0xf96, lsl #16    // Store 0xf96E004 to x4, which is address of GPIO 110.
     ldr     w6, [x4]                // Get status value from address stored in x4 and store it to w6.

@@ -1,10 +1,9 @@
 cmake_minimum_required(VERSION 3.18)
 project(MultiBootKernelPatcher C)
 
-option(BUILD_SHIM_LOADER "Build the ARM64 ShimLoader binary" ON)
-option(BUILD_SHIMS "Build the simplified ARM64 Shims" ${BUILD_SHIM_LOADER})
+option(BUILD_SHIMS "Build the ARM64 Shim binaries" ON)
 
-if (BUILD_SHIM_LOADER OR BUILD_SHIMS)
+if (BUILD_SHIMS)
     if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
         # MinGW compiler download link:
         # https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads
@@ -75,9 +74,6 @@ if (MSVC)
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif ()
 
-if (BUILD_SHIM_LOADER)
-    add_subdirectory(ShimLoader)
-endif ()
 if (BUILD_SHIMS)
     add_subdirectory(Shims)
 endif ()
