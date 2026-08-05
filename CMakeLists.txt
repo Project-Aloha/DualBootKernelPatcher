@@ -53,9 +53,9 @@ set(INIH_TARGET inih_static)
 # Compile the patcher.
 add_executable(MultiBootKernelPatcher
     src/patcher.c
-    src/shim.c
-    src/shim_format.c
-    src/shim_config.c
+    src/pack.c
+    src/image_format.c
+    src/pack_config.c
     src/utils.c
 )
 target_include_directories(MultiBootKernelPatcher PRIVATE
@@ -68,7 +68,7 @@ endif ()
 target_link_libraries(MultiBootKernelPatcher PRIVATE ${INIH_TARGET})
 add_executable(UnpackTool
     src/unpack.c
-    src/shim_format.c
+    src/image_format.c
     src/utils.c
 )
 target_include_directories(UnpackTool PRIVATE

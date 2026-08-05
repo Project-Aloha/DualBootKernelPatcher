@@ -1,30 +1,30 @@
-#include "shim_format.h"
+#include "image_format.h"
 
-uint32_t shim_read_le32(const uint8_t *buffer) {
+uint32_t image_read_le32(const uint8_t *buffer) {
     uint32_t value = 0;
     for (int index = 3; index >= 0; index--)
         value = (value << 8) | buffer[index];
     return value;
 }
 
-uint64_t shim_read_le64(const uint8_t *buffer) {
+uint64_t image_read_le64(const uint8_t *buffer) {
     uint64_t value = 0;
     for (int index = 7; index >= 0; index--)
         value = (value << 8) | buffer[index];
     return value;
 }
 
-void shim_write_le32(uint8_t *buffer, uint32_t value) {
+void image_write_le32(uint8_t *buffer, uint32_t value) {
     for (int index = 0; index < 4; index++)
         buffer[index] = (uint8_t)(value >> (index * 8) & 0xff);
 }
 
-void shim_write_le64(uint8_t *buffer, uint64_t value) {
+void image_write_le64(uint8_t *buffer, uint64_t value) {
     for (int index = 0; index < 8; index++)
         buffer[index] = (uint8_t)(value >> (index * 8) & 0xff);
 }
 
-bool shim_align_up(size_t value, size_t alignment, size_t *result) {
+bool image_align_up(size_t value, size_t alignment, size_t *result) {
     if (alignment == 0 || (alignment & (alignment - 1)) != 0 ||
         value > SIZE_MAX - (alignment - 1))
         return false;
@@ -32,7 +32,8 @@ bool shim_align_up(size_t value, size_t alignment, size_t *result) {
     return true;
 }
 
-bool shim_inspect_arm64_image(const FileContent *file, Arm64ImageInfo *info) {
+bool image_inspect_arm64_linux(const FileContent *file,
+                               Arm64ImageInfo *info) {
     static const uint8_t arm64Magic[] = {'A', 'R', 'M', 0x64};
 
     info->headerOffset = 0;
@@ -46,20 +47,20 @@ bool shim_inspect_arm64_image(const FileContent *file, Arm64ImageInfo *info) {
         return false;
 
     info->payloadSize = file->fileSize - info->headerOffset;
-    info->textOffset = shim_read_le64(
+    info->textOffset = image_read_le64(
         file->fileBuffer + info->headerOffset + 0x08);
-    info->imageSize = shim_read_le64(
+    info->imageSize = image_read_le64(
         file->fileBuffer + info->headerOffset + 0x10);
     return true;
 }
 
-bool shim_is_executable_type(uint32_t type) {
+bool manifest_entry_type_is_executable(uint32_t type) {
     return type == SHIM_ENTRY_TYPE_LINUX ||
            type == SHIM_ENTRY_TYPE_FREE_EXEC ||
            type == SHIM_ENTRY_TYPE_SHIM;
 }
 
-const char *shim_type_name(uint32_t type) {
+const char *manifest_entry_type_name(uint32_t type) {
     switch (type) {
     case SHIM_ENTRY_TYPE_LINUX:
         return "Linux";

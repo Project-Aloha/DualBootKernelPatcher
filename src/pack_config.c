@@ -1,4 +1,5 @@
-#include "shim.h"
+#include "image_format.h"
+#include "pack.h"
 
 #include <ini.h>
 
@@ -9,8 +10,8 @@
 #include <string.h>
 
 typedef struct {
-    ShimPackConfig config;
-    char configDirectory[SHIM_PATH_SIZE];
+    PackConfig config;
+    char configDirectory[PACK_PATH_SIZE];
     char error[256];
 } ConfigParser;
 
@@ -103,7 +104,7 @@ static bool set_path_once(char *destination,
            resolve_path(destination, size, parser->configDirectory, value);
 }
 
-static ShimImageConfig *find_or_add_image(ConfigParser *parser,
+static PackImageConfig *find_or_add_image(ConfigParser *parser,
                                           const char *section) {
     for (size_t index = 0; index < parser->config.imageCount; index++) {
         if (strcmp(parser->config.images[index].section, section) == 0)
@@ -114,17 +115,11 @@ static ShimImageConfig *find_or_add_image(ConfigParser *parser,
         strlen(section) >= sizeof(parser->config.images[0].section))
         return NULL;
 
-    ShimImageConfig *image =
+    PackImageConfig *image =
         &parser->config.images[parser->config.imageCount++];
     memcpy(image->section, section, strlen(section) + 1);
     image->baseImage = -1;
     return image;
-}
-
-static bool is_executable_type(uint32_t type) {
-    return type == SHIM_ENTRY_TYPE_LINUX ||
-           type == SHIM_ENTRY_TYPE_FREE_EXEC ||
-           type == SHIM_ENTRY_TYPE_SHIM;
 }
 
 static uint32_t manifest_entry_index(size_t imageIndex,
@@ -168,7 +163,7 @@ static int config_handler(void *user,
         }
     } else if (strcmp(section, "Image") == 0 ||
                (strncmp(section, "Image-", 6) == 0 && section[6] != '\0')) {
-        ShimImageConfig *image = find_or_add_image(parser, section);
+        PackImageConfig *image = find_or_add_image(parser, section);
         if (image != NULL) {
             if (strcmp(name, "Name") == 0)
                 valid = set_once(image->name, sizeof(image->name), value);
@@ -234,7 +229,7 @@ static bool get_config_directory(const char *configPath,
 static bool validate_config(ConfigParser *parser,
                             size_t *baseImageIndex,
                             size_t *defaultIndex) {
-    ShimPackConfig *config = &parser->config;
+    PackConfig *config = &parser->config;
     if (config->shim[0] == '\0' || config->output[0] == '\0') {
         printf("Error: [Pack] requires Shim and Output.\n");
         return false;
@@ -248,7 +243,7 @@ static bool validate_config(ConfigParser *parser,
     bool defaultFound = false;
     bool hasDeviceTreeBlobReference = false;
     for (size_t index = 0; index < config->imageCount; index++) {
-        ShimImageConfig *image = &config->images[index];
+        PackImageConfig *image = &config->images[index];
         if (image->name[0] == '\0' || image->path[0] == '\0' ||
             !image->hasType || image->baseImage == -1) {
             printf("Error: [%s] requires Name, Path, Type and BaseImage.\n",
@@ -257,7 +252,7 @@ static bool validate_config(ConfigParser *parser,
         }
         if (!image->hasAlignment)
             image->alignment = 4;
-        if (image->alignment < SHIM_BRANCH_ALIGNMENT ||
+        if (image->alignment < IMAGE_BRANCH_ALIGNMENT ||
             image->alignment > UINT32_MAX ||
             (image->alignment & (image->alignment - 1)) != 0) {
             printf("Error: [%s] Align must be a power of two from 4 to "
@@ -309,7 +304,7 @@ static bool validate_config(ConfigParser *parser,
                    image->section);
             return false;
         }
-        bool executable = is_executable_type(image->type);
+        bool executable = manifest_entry_type_is_executable(image->type);
         if (image->type == SHIM_ENTRY_TYPE_MANIFEST) {
             printf("Error: [%s] must be configured as the [Manifest] "
                    "section.\n", image->section);
@@ -350,14 +345,14 @@ static bool validate_config(ConfigParser *parser,
         return false;
     }
     for (size_t index = 0; index < config->imageCount; index++) {
-        ShimImageConfig *image = &config->images[index];
+        PackImageConfig *image = &config->images[index];
         if (!image->hasDeviceTreeBlob)
             continue;
 
         bool found = false;
         for (size_t targetIndex = 0; targetIndex < config->imageCount;
              targetIndex++) {
-            ShimImageConfig *target = &config->images[targetIndex];
+            PackImageConfig *target = &config->images[targetIndex];
             if (strcmp(target->section, image->deviceTreeBlobSection) != 0)
                 continue;
             if (target->type != SHIM_ENTRY_TYPE_DTB) {
@@ -389,7 +384,8 @@ static bool validate_config(ConfigParser *parser,
         printf("Error: Default must name an [Image-*] section.\n");
         return false;
     }
-    if (!is_executable_type(config->images[*defaultIndex].type)) {
+        if (!manifest_entry_type_is_executable(
+            config->images[*defaultIndex].type)) {
         printf("Error: Default must name an executable [Image-*] section.\n");
         return false;
     }
@@ -398,7 +394,7 @@ static bool validate_config(ConfigParser *parser,
     return true;
 }
 
-int PackConfig(const char *configPath) {
+int PackConfigFile(const char *configPath) {
     ConfigParser parser = {0};
     parser.config.timeoutMs = 5000;
     if (!get_config_directory(configPath, parser.configDirectory,
@@ -422,5 +418,5 @@ int PackConfig(const char *configPath) {
     if (!validate_config(&parser, &baseImageIndex, &defaultIndex))
         return -EINVAL;
 
-    return PackShim(&parser.config);
+    return PackImage(&parser.config);
 }

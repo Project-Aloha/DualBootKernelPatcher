@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#include "shim.h"
+#include "pack.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -18,5 +18,5 @@ int main(int argc, char *argv[]) {
         printf("Usage: MultiBootKernelPatcher <Config File>\n");
         return -EINVAL;
     }
-    return PackConfig(argv[1]);
+    return PackConfigFile(argv[1]);
 }

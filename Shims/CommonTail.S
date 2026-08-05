@@ -15,10 +15,10 @@ _UEFI:
     // Linux header +0x20: runtime-relative Manifest offset. Zero means absent.
     ldr     x25, [x24, #0x20]
     cbz     x25, _Linux
-    // Linux header +0x28: full v6 Manifest blob size. A two-entry v6 blob is
-    // at least 448 bytes: header, two entries, recovery header and recovery entries.
+    // Linux header +0x28: full v7 Manifest blob size. A two-entry v7 blob is
+    // 384 bytes: one 128-byte header and two 128-byte entries.
     ldr     x8, [x24, #0x28]
-    cmp     x8, #448
+    cmp     x8, #384
     b.lo    _Linux
     add     x25, x24, x25
 
@@ -29,22 +29,22 @@ _UEFI:
     cmp     x8, x9
     b.ne    _Linux
     ldr     w8, [x25, #8]
-    cmp     w8, #6
+    cmp     w8, #7
     b.ne    _Linux
     ldr     w8, [x25, #12]
-    cmp     w8, #64
+    cmp     w8, #128
     b.ne    _Linux
     ldr     w8, [x25, #16]
-    cmp     w8, #80
+    cmp     w8, #128
     b.ne    _Linux
     ldr     w8, [x25, #20]
     cmp     w8, #2
     b.lo    _Linux
 
-    // Entry #1 follows the 64-byte header and the BaseImage entry (#0).
+    // Entry #1 follows the 128-byte header and BaseImage entry (#0).
     // This fixed UEFI path expects entry #1 to be an executable payload.
-    add     x25, x25, #64
-    add     x25, x25, #80
+    add     x25, x25, #128
+    add     x25, x25, #128
     // ShimManifestEntry: offset +0x20, size +0x28, type +0x30,
     // flags +0x34, loadAddress +0x38 and entryOffset +0x40.
     ldr     w8, [x25, #48]

@@ -12,11 +12,11 @@ _ShimStart:
     sub     x24, x23, #4
 
     // Linux header +0x20/+0x28 contain the runtime-relative Manifest offset
-    // and the full v6 Manifest blob size. A two-entry v6 blob is >= 448 bytes.
+    // and the full v7 Manifest blob size. A two-entry v7 blob is 384 bytes.
     ldr     x25, [x24, #0x20]
     cbz     x25, _Linux
     ldr     x8, [x24, #0x28]
-    cmp     x8, #448
+    cmp     x8, #384
     b.lo    _Linux
     add     x25, x24, x25
     // ShimManifestHeader: magic +0x00, version +0x08, headerSize +0x0c,
@@ -26,22 +26,22 @@ _ShimStart:
     cmp     x8, x9
     b.ne    _Linux
     ldr     w8, [x25, #8]
-    cmp     w8, #6
+    cmp     w8, #7
     b.ne    _Linux
     ldr     w8, [x25, #12]
-    cmp     w8, #64
+    cmp     w8, #128
     b.ne    _Linux
     ldr     w8, [x25, #16]
-    cmp     w8, #80
+    cmp     w8, #128
     b.ne    _Linux
     ldr     w8, [x25, #20]
     cmp     w8, #2
     b.lo    _Linux
 
-    // Entry #1 starts after the 64-byte header and BaseImage entry (#0).
+    // Entry #1 starts after the 128-byte header and BaseImage entry (#0).
     // KernelWrapper reserves it for a DTB payload copied to a fixed address.
-    add     x25, x25, #64
-    add     x25, x25, #80
+    add     x25, x25, #128
+    add     x25, x25, #128
     // ShimManifestEntry: offset +0x20, size +0x28, type +0x30,
     // flags +0x34 and loadAddress +0x38.
     ldr     w8, [x25, #48]
