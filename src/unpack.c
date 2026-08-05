@@ -195,6 +195,17 @@ static bool load_packed(const char *path, PackedImage *packed) {
             printf("Error: Input image has invalid recovery metadata.\n");
             return false;
         }
+        if (entry->deviceTreeBlobEntry != SHIM_NO_DEVICE_TREE_BLOB) {
+            if (!shim_is_executable_type(entry->type) ||
+                entry->deviceTreeBlobEntry >= entryCount ||
+                manifest->entries[entry->deviceTreeBlobEntry].type !=
+                    SHIM_ENTRY_TYPE_DTB ||
+                manifest->entries[entry->deviceTreeBlobEntry].flags != 0) {
+                printf("Error: Input image has an invalid DeviceTreeBlob "
+                       "reference.\n");
+                return false;
+            }
+        }
         if (index == 0) {
             if (entry->size > primarySlot)
                 return false;
@@ -331,6 +342,9 @@ static bool write_config(const PackedImage *packed, const char *directory) {
         if (shim_is_executable_type(entry->type))
             fprintf(file, "EntryOffset=0x%llx\n",
                     (unsigned long long)entry->entryOffset);
+        if (entry->deviceTreeBlobEntry != SHIM_NO_DEVICE_TREE_BLOB)
+            fprintf(file, "DeviceTreeBlob=Image-%02llu\n",
+                (unsigned long long)entry->deviceTreeBlobEntry);
         fprintf(file, "\n");
     }
     fprintf(file, "[Manifest]\nType=Manifest\n");

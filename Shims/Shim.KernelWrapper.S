@@ -7,20 +7,25 @@ _ShimStart:
     mov     x21, x2
     mov     x22, x3
     mov     x23, x30
+    // BL leaves LR at BaseImage + 4; derive the ARM64 Linux header address.
     sub     x24, x23, #4
 
+    // Linux header +0x20/+0x28 contain the runtime-relative Manifest offset
+    // and the full v6 Manifest blob size. A two-entry v6 blob is >= 448 bytes.
     ldr     x25, [x24, #0x20]
     cbz     x25, _Linux
     ldr     x8, [x24, #0x28]
     cmp     x8, #448
     b.lo    _Linux
     add     x25, x24, x25
+    // ShimManifestHeader: magic +0x00, version +0x08, headerSize +0x0c,
+    // entrySize +0x10 and entryCount +0x14.
     ldr     x8, [x25]
     ldr     x9, _ManifestMagic
     cmp     x8, x9
     b.ne    _Linux
     ldr     w8, [x25, #8]
-    cmp     w8, #5
+    cmp     w8, #6
     b.ne    _Linux
     ldr     w8, [x25, #12]
     cmp     w8, #64
@@ -32,14 +37,20 @@ _ShimStart:
     cmp     w8, #2
     b.lo    _Linux
 
+    // Entry #1 starts after the 64-byte header and BaseImage entry (#0).
+    // KernelWrapper reserves it for a DTB payload copied to a fixed address.
     add     x25, x25, #64
     add     x25, x25, #80
+    // ShimManifestEntry: offset +0x20, size +0x28, type +0x30,
+    // flags +0x34 and loadAddress +0x38.
     ldr     w8, [x25, #48]
+    // SHIM_ENTRY_TYPE_DTB is 5; SHIM_ENTRY_FLAG_COPY is bit 1.
     cmp     w8, #5
     b.ne    _Linux
     ldr     w8, [x25, #52]
     tbz     w8, #1, _Linux
 
+    // Copy the packed DTB from BaseImage + entry.offset to entry.loadAddress.
     ldr     x8, [x25, #32]
     add     x8, x24, x8
     ldr     x9, [x25, #56]
@@ -50,11 +61,13 @@ _ShimStart:
     mov     x12, x10
     bl      _CopyLoop
 
+    // Clean the replacement DTB range before returning to the Linux branch.
     mov     x0, x11
     mov     x1, x12
     bl      _SyncDataCache
 
     mov     x0, x11
+    // Return through the original Linux branch with replacement FDT in x0.
     mov     x1, x20
     mov     x2, x21
     mov     x3, x22
@@ -70,6 +83,7 @@ _Linux:
     ret
 
 _CopyLoop:
+    // x8 = source, x9 = destination, x10 = remaining bytes.
     cbz     x10, 2f
 1:
     ldrb    w13, [x8], #1

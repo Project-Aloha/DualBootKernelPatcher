@@ -121,6 +121,19 @@ static ShimImageConfig *find_or_add_image(ConfigParser *parser,
     return image;
 }
 
+static bool is_executable_type(uint32_t type) {
+    return type == SHIM_ENTRY_TYPE_LINUX ||
+           type == SHIM_ENTRY_TYPE_FREE_EXEC ||
+           type == SHIM_ENTRY_TYPE_SHIM;
+}
+
+static uint32_t manifest_entry_index(size_t imageIndex,
+                                     size_t baseImageIndex) {
+    if (imageIndex == baseImageIndex)
+        return 0;
+    return (uint32_t)(1 + imageIndex - (imageIndex > baseImageIndex));
+}
+
 static int config_handler(void *user,
                           const char *section,
                           const char *name,
@@ -184,6 +197,11 @@ static int config_handler(void *user,
                        !image->hasEntryOffset) {
                 valid = parse_u64(value, &image->entryOffset);
                 image->hasEntryOffset = valid;
+            } else if (strcmp(name, "DeviceTreeBlob") == 0 &&
+                       !image->hasDeviceTreeBlob && value[0] != '\0') {
+                valid = copy_text(image->deviceTreeBlobSection,
+                                  sizeof(image->deviceTreeBlobSection), value);
+                image->hasDeviceTreeBlob = valid;
             }
         }
     }
@@ -228,6 +246,7 @@ static bool validate_config(ConfigParser *parser,
 
     size_t baseImageCount = 0;
     bool defaultFound = false;
+    bool hasDeviceTreeBlobReference = false;
     for (size_t index = 0; index < config->imageCount; index++) {
         ShimImageConfig *image = &config->images[index];
         if (image->name[0] == '\0' || image->path[0] == '\0' ||
@@ -290,9 +309,7 @@ static bool validate_config(ConfigParser *parser,
                    image->section);
             return false;
         }
-        bool executable = image->type == SHIM_ENTRY_TYPE_LINUX ||
-                          image->type == SHIM_ENTRY_TYPE_FREE_EXEC ||
-                          image->type == SHIM_ENTRY_TYPE_SHIM;
+        bool executable = is_executable_type(image->type);
         if (image->type == SHIM_ENTRY_TYPE_MANIFEST) {
             printf("Error: [%s] must be configured as the [Manifest] "
                    "section.\n", image->section);
@@ -303,6 +320,12 @@ static bool validate_config(ConfigParser *parser,
                    image->section);
             return false;
         }
+        if (image->hasDeviceTreeBlob && !executable) {
+            printf("Error: [%s] DeviceTreeBlob requires an executable Type.\n",
+                   image->section);
+            return false;
+        }
+        hasDeviceTreeBlobReference |= image->hasDeviceTreeBlob;
         if (config->defaultSection[0] != '\0' &&
             strcmp(image->section, config->defaultSection) == 0) {
             *defaultIndex = index;
@@ -322,6 +345,42 @@ static bool validate_config(ConfigParser *parser,
         return false;
     }
     config->baseImageIndex = *baseImageIndex;
+    if (hasDeviceTreeBlobReference && !config->manifest.present) {
+        printf("Error: DeviceTreeBlob requires a [Manifest] section.\n");
+        return false;
+    }
+    for (size_t index = 0; index < config->imageCount; index++) {
+        ShimImageConfig *image = &config->images[index];
+        if (!image->hasDeviceTreeBlob)
+            continue;
+
+        bool found = false;
+        for (size_t targetIndex = 0; targetIndex < config->imageCount;
+             targetIndex++) {
+            ShimImageConfig *target = &config->images[targetIndex];
+            if (strcmp(target->section, image->deviceTreeBlobSection) != 0)
+                continue;
+            if (target->type != SHIM_ENTRY_TYPE_DTB) {
+                printf("Error: [%s] DeviceTreeBlob [%s] must set Type=DTB.\n",
+                       image->section, target->section);
+                return false;
+            }
+            if (target->hasCopyAddress) {
+                printf("Error: [%s] DeviceTreeBlob [%s] cannot set CopyTo.\n",
+                       image->section, target->section);
+                return false;
+            }
+            image->deviceTreeBlobEntry = manifest_entry_index(
+                targetIndex, *baseImageIndex);
+            found = true;
+            break;
+        }
+        if (!found) {
+            printf("Error: [%s] DeviceTreeBlob section [%s] was not found.\n",
+                   image->section, image->deviceTreeBlobSection);
+            return false;
+        }
+    }
     if (config->defaultSection[0] == '\0') {
         *defaultIndex = *baseImageIndex;
         defaultFound = true;
@@ -330,10 +389,12 @@ static bool validate_config(ConfigParser *parser,
         printf("Error: Default must name an [Image-*] section.\n");
         return false;
     }
-    config->defaultEntry = (uint32_t)(
-        *defaultIndex == *baseImageIndex
-            ? 0
-            : 1 + *defaultIndex - (*defaultIndex > *baseImageIndex));
+    if (!is_executable_type(config->images[*defaultIndex].type)) {
+        printf("Error: Default must name an executable [Image-*] section.\n");
+        return false;
+    }
+    config->defaultEntry = manifest_entry_index(*defaultIndex,
+                                                *baseImageIndex);
     return true;
 }
 

@@ -34,6 +34,9 @@ Shim runtime, and multiple bootable images from one INI configuration.
     ```sh
     MultiBootKernelPatcher Config/Shim.Sample.cfg
     ```
+    An executable image may set `DeviceTreeBlob=Image-DTB` to boot with the
+    `Type=DTB` image section named `Image-DTB`. The referenced DTB is checked
+    during configuration validation.
   - Unpack a patched image that contains a reversible Manifest.
     ```sh
     UnpackTool PatchedKernel unpacked

@@ -172,6 +172,7 @@ int PackShim(const ShimPackConfig *config) {
     baseEntry->offset = 0;
     baseEntry->size = primaryInfo.payloadSize;
     baseEntry->flags = SHIM_ENTRY_FLAG_BASE_IMAGE;
+    baseEntry->deviceTreeBlobEntry = baseImage->deviceTreeBlobEntry;
 
     size_t manifestIndex = 1;
     for (size_t index = 0; index < config->imageCount; index++) {
@@ -275,6 +276,7 @@ int PackShim(const ShimPackConfig *config) {
         memcpy(entry->name, image->name, strlen(image->name) + 1);
         entry->type = image->type;
         entry->entryOffset = image->entryOffset;
+        entry->deviceTreeBlobEntry = image->deviceTreeBlobEntry;
         entry->offset = imageOffset;
         entry->size = payloadSize;
         if (image->hasCopyAddress) {

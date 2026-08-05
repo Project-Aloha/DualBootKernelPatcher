@@ -4,9 +4,10 @@
 #include <stdint.h>
 
 #define SHIM_MANIFEST_MAGIC "SHIMMF\0"
-#define SHIM_MANIFEST_VERSION 5U
+#define SHIM_MANIFEST_VERSION 6U
 #define SHIM_MANIFEST_MAX_SIZE 0x2000U
 #define SHIM_MAX_ENTRIES 50U
+#define SHIM_NO_DEVICE_TREE_BLOB 0U
 #define SHIM_MANIFEST_RECOVERY_MAGIC "SHIMREC\0"
 #define SHIM_MANIFEST_RECOVERY_VERSION 1U
 #define SHIM_LINUX_HEADER_SIZE 0x40U
@@ -42,6 +43,9 @@ typedef struct {
     int hasAlignment;
     uint64_t entryOffset;
     int hasEntryOffset;
+    char deviceTreeBlobSection[32];
+    int hasDeviceTreeBlob;
+    uint32_t deviceTreeBlobEntry;
 } ShimImageConfig;
 
 typedef struct {
@@ -89,7 +93,7 @@ typedef struct SHIM_PACKED {
     uint32_t flags;
     uint64_t loadAddress;
     uint64_t entryOffset;
-    uint64_t reserved;
+    uint64_t deviceTreeBlobEntry;
 } ShimManifestEntry;
 
 typedef struct SHIM_PACKED {

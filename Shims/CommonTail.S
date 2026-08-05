@@ -10,20 +10,26 @@ _Linux:
     ret
 
 _UEFI:
+    // BL leaves LR at BaseImage + 4. The ARM64 Linux header starts at BaseImage.
     sub     x24, x23, #4
+    // Linux header +0x20: runtime-relative Manifest offset. Zero means absent.
     ldr     x25, [x24, #0x20]
     cbz     x25, _Linux
+    // Linux header +0x28: full v6 Manifest blob size. A two-entry v6 blob is
+    // at least 448 bytes: header, two entries, recovery header and recovery entries.
     ldr     x8, [x24, #0x28]
     cmp     x8, #448
     b.lo    _Linux
     add     x25, x24, x25
 
+    // ShimManifestHeader: magic +0x00, version +0x08, headerSize +0x0c,
+    // entrySize +0x10 and entryCount +0x14.
     ldr     x8, [x25]
     ldr     x9, _ManifestMagic
     cmp     x8, x9
     b.ne    _Linux
     ldr     w8, [x25, #8]
-    cmp     w8, #5
+    cmp     w8, #6
     b.ne    _Linux
     ldr     w8, [x25, #12]
     cmp     w8, #64
@@ -35,8 +41,12 @@ _UEFI:
     cmp     w8, #2
     b.lo    _Linux
 
+    // Entry #1 follows the 64-byte header and the BaseImage entry (#0).
+    // This fixed UEFI path expects entry #1 to be an executable payload.
     add     x25, x25, #64
     add     x25, x25, #80
+    // ShimManifestEntry: offset +0x20, size +0x28, type +0x30,
+    // flags +0x34, loadAddress +0x38 and entryOffset +0x40.
     ldr     w8, [x25, #48]
     cbz     w8, _Linux
     cmp     w8, #3
@@ -49,21 +59,26 @@ _UEFI:
     cmp     x11, x12
     b.hi    _Linux
 
+    // Source address is BaseImage plus the payload's runtime-relative offset.
     ldr     x8, [x25, #32]
     add     x8, x24, x8
     ldr     w9, [x25, #52]
+    // SHIM_ENTRY_FLAG_COPY is bit 1. Copy before executing when it is set.
     tbz     w9, #1, _ExecuteEntry
     ldr     x9, [x25, #56]
     cbz     x9, _Linux
     mov     x24, x9
     mov     x12, x10
     bl      _CopyLoop
+    // Clean and invalidate the copied executable range before branching to it.
     mov     x0, x24
     mov     x1, x12
     bl      _SyncImageCache
     mov     x8, x24
 
 _ExecuteEntry:
+    // Execute payloadBase + entryOffset. Preserve the established payload ABI:
+    // x0/x1 identify the end of this Shim image and x2/x3 retain Linux args.
     add     x24, x8, x11
     adr     x0, _ShimImageEnd
     adr     x1, _ShimImageEnd
@@ -72,6 +87,7 @@ _ExecuteEntry:
     br      x24
 
 _CopyLoop:
+    // x8 = source, x9 = destination, x10 = remaining bytes.
     cbz     x10, 2f
 1:
     ldrb    w13, [x8], #1
