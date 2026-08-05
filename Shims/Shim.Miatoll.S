@@ -1,4 +1,5 @@
-.include "DummyHead.S"
+.text
+.align 2
 
 /* Simplified Shim for Redmi Note 9S */
 _ShimStart:

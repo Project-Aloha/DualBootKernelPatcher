@@ -1,4 +1,5 @@
-.include "DummyHead.S"
+.text
+.align 2
 
 /* Simplified Shim for Oneplus 7T Pro */
 _ShimStart:

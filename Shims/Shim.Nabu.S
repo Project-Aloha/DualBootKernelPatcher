@@ -1,4 +1,5 @@
-.include "DummyHead.S"
+.text
+.align 2
 
 /* Simplified Shim for Xiaomi Pad 5 Pro */
 _ShimStart:

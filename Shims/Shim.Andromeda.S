@@ -1,4 +1,5 @@
-.include "DummyHead.S"
+.text
+.align 2
 
 /* Simplified Shim for Xiaomi Mix3 5G */
 _ShimStart:

@@ -1,5 +1,6 @@
 /* Assembly Shim for replacing the Linux DTB before entering BaseImage. */
-.include "DummyHead.S"
+.text
+.align 2
 
 _ShimStart:
     mov     x19, x0

@@ -17,7 +17,6 @@ foreach (CURRENT_ASM_SOURCE_SUFFIX ${ASM_SOURCES})
         -o "${SHIM_ELF_DIR}/${CURRENT_ASM_SOURCE}.elf"
         DEPENDS
             "${CMAKE_CURRENT_SOURCE_DIR}/${CURRENT_ASM_SOURCE}.S"
-            "${CMAKE_CURRENT_SOURCE_DIR}/DummyHead.S"
             "${CMAKE_CURRENT_SOURCE_DIR}/CommonTail.S"
     )
 
