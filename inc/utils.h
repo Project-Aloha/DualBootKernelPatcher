@@ -1,8 +1,9 @@
 /** @file
  * Multi-Boot Kernel Patcher Header File.
  *
- *  Copyright (c) 2021-2025 The DuoWoa authors. All rights reserved.
- *  MIT License
+ *  Copyright (c) 2021-2026 The DuoWoa authors. All rights reserved.
+ *  Copyright (c) 2024-2026 The AlohaWoA authors. All rights reserved.
+ *  SPDX-License-Identifier: GPL-3.0-or-later
  *
  */
 

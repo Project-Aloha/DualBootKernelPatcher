@@ -53,4 +53,4 @@ Shim runtime, and multiple bootable images from one INI configuration.
   - You can go to our [document website](https://aloha.firmware.icu/) to get more infomation about the Multi-Boot Kernel Patcher.
 
 ## License
-  MIT License.
+  GNU General Public License v3.0 (GPLv3).
