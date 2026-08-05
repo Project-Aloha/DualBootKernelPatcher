@@ -52,7 +52,7 @@ jobs:
             executable_directory: .
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -105,7 +105,7 @@ jobs:
           cp "build/${{ matrix.executable_directory }}/UnpackTool${{ matrix.executable_suffix }}" artifacts/tools/
 
       - name: Upload host tools
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Tools-${{ matrix.os }}-${{ matrix.arch }}
           path: artifacts/tools
