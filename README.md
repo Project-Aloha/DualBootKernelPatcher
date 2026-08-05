@@ -34,8 +34,17 @@ Shim runtime, and multiple bootable images from one INI configuration.
     ```sh
     MultiBootKernelPatcher Config/Shim.Sample.cfg
     ```
+  - Unpack a patched image that contains a reversible Manifest.
+    ```sh
+    UnpackTool PatchedKernel unpacked
+    ```
+    The output directory contains BaseImage, Shim, image payloads, and
+    `config.cfg`. Edit those files as needed, then repack `config.cfg` to
+    create `RepackedKernel` in the same directory.
   - Notice
     + Device Shim blobs are generated under `output/Shims/`.
+    + Images without the current reversible Manifest are not supported by
+      `UnpackTool`.
 
 ## See More
   - You can go to our [document website](https://aloha.firmware.icu/) to get more infomation about the Multi-Boot Kernel Patcher.

@@ -14,7 +14,7 @@ _UEFI:
     ldr     x25, [x24, #0x20]
     cbz     x25, _Linux
     ldr     x8, [x24, #0x28]
-    cmp     x8, #224
+    cmp     x8, #448
     b.lo    _Linux
     add     x25, x24, x25
 
@@ -23,7 +23,7 @@ _UEFI:
     cmp     x8, x9
     b.ne    _Linux
     ldr     w8, [x25, #8]
-    cmp     w8, #4
+    cmp     w8, #5
     b.ne    _Linux
     ldr     w8, [x25, #12]
     cmp     w8, #64

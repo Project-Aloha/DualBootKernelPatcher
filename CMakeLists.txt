@@ -54,6 +54,7 @@ set(INIH_TARGET inih_static)
 add_executable(MultiBootKernelPatcher
     src/patcher.c
     src/shim.c
+    src/shim_format.c
     src/shim_config.c
     src/utils.c
 )
@@ -65,12 +66,16 @@ if (MSVC)
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif ()
 target_link_libraries(MultiBootKernelPatcher PRIVATE ${INIH_TARGET})
-add_executable(HDRTool src/HDRTool.c src/utils.c)
-target_include_directories(HDRTool PRIVATE
+add_executable(UnpackTool
+    src/unpack.c
+    src/shim_format.c
+    src/utils.c
+)
+target_include_directories(UnpackTool PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/inc
 )
 if (MSVC)
-    set_property(TARGET HDRTool PROPERTY
+    set_property(TARGET UnpackTool PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif ()
 

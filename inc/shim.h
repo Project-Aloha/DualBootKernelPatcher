@@ -4,9 +4,13 @@
 #include <stdint.h>
 
 #define SHIM_MANIFEST_MAGIC "SHIMMF\0"
-#define SHIM_MANIFEST_VERSION 4U
-#define SHIM_MANIFEST_MAX_SIZE 0x1000U
+#define SHIM_MANIFEST_VERSION 5U
+#define SHIM_MANIFEST_MAX_SIZE 0x2000U
 #define SHIM_MAX_ENTRIES 50U
+#define SHIM_MANIFEST_RECOVERY_MAGIC "SHIMREC\0"
+#define SHIM_MANIFEST_RECOVERY_VERSION 1U
+#define SHIM_LINUX_HEADER_SIZE 0x40U
+#define SHIM_WRAPPER_SIZE 0x14U
 #define SHIM_LINUX_ALIGNMENT 0x200000U
 #define SHIM_BRANCH_ALIGNMENT 4U
 #define SHIM_BRANCH_MIN_OFFSET (-0x08000000LL)
@@ -89,6 +93,26 @@ typedef struct SHIM_PACKED {
 } ShimManifestEntry;
 
 typedef struct SHIM_PACKED {
+    char magic[8];
+    uint32_t version;
+    uint32_t headerSize;
+    uint32_t entrySize;
+    uint32_t entryCount;
+    uint64_t shimSize;
+    uint8_t baseHeader[SHIM_LINUX_HEADER_SIZE];
+    uint8_t reserved[32];
+} ShimManifestRecoveryHeader;
+
+typedef struct SHIM_PACKED {
+    uint64_t alignment;
+    uint64_t copySizeMax;
+    uint32_t sourcePrefixSize;
+    uint32_t reserved;
+    uint8_t sourcePrefix[SHIM_WRAPPER_SIZE];
+    uint8_t padding[4];
+} ShimManifestRecoveryEntry;
+
+typedef struct SHIM_PACKED {
     ShimManifestHeader header;
     ShimManifestEntry entries[SHIM_MAX_ENTRIES];
 } ShimManifest;
@@ -104,6 +128,10 @@ _Static_assert(sizeof(ShimManifestEntry) == 80,
                "Invalid Shim manifest entry size");
 _Static_assert(sizeof(ShimManifest) <= SHIM_MANIFEST_MAX_SIZE,
                "Shim manifest exceeds its maximum size");
+_Static_assert(sizeof(ShimManifestRecoveryHeader) == 128,
+               "Invalid Shim manifest recovery header size");
+_Static_assert(sizeof(ShimManifestRecoveryEntry) == 48,
+               "Invalid Shim manifest recovery entry size");
 
 int PackConfig(const char *configPath);
 int PackShim(const ShimPackConfig *config);
