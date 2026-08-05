@@ -51,7 +51,9 @@ static bool valid_name(const char name[32]) {
         return false;
     for (const char *current = name; current < end; current++) {
         unsigned char character = (unsigned char)*current;
-        if (character < 0x20 || character == 0x7f)
+        /* Reject control characters and ';', which inih treats as an
+         * inline comment and would truncate the generated config. */
+        if (character < 0x20 || character == 0x7f || character == ';')
             return false;
     }
     return true;
