@@ -1,7 +1,12 @@
 .include "DummyHead.S"
 
-/* Shell Code for Oneplus 7T Pro */
-_ShellCodeStart:
+/* Simplified Shim for Oneplus 7T Pro */
+_ShimStart:
+    mov     x19, x0
+    mov     x20, x1
+    mov     x21, x2
+    mov     x22, x3
+    mov     x23, x30
     movz    x4, #0xd000
     movk    x4, #0x317, lsl #16     // Store 0x317d004 to x4, which is control reg of gpio 125.
     str     wzr, [x4], #4           // Set 0 in control reg, then x4 add 4

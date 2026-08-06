@@ -9,14 +9,20 @@
  *
  */
 size_t get_file_size(FileContent *fileContent) {
-    FILE *pFile = fopen(fileContent->filePath, "r");
+    FILE *pFile = fopen(fileContent->filePath, "rb");
     if (pFile == NULL) {
         printf("Error: %s not found\n", fileContent->filePath);
         return 0;
     }
-    fseek(pFile, 0, SEEK_END);
-    size_t len = ftell(pFile);
+    if (fseek(pFile, 0, SEEK_END) != 0) {
+        fclose(pFile);
+        return 0;
+    }
+    long position = ftell(pFile);
     fclose(pFile);
+    if (position <= 0)
+        return 0;
+    size_t len = (size_t)position;
     fileContent->fileSize = len;
     return len;
 }
@@ -33,8 +39,11 @@ uint8_t *read_file_content(FileContent *fileContent) {
     FILE *pFile = fopen(fileContent->filePath, "rb");
     if (pFile == NULL)
         return NULL;
-    fread(fileContent->fileBuffer, fileContent->fileSize, 1, pFile);
-    fclose(pFile);
+    size_t readSize = fread(fileContent->fileBuffer, 1,
+                            fileContent->fileSize, pFile);
+    int closeStatus = fclose(pFile);
+    if (readSize != fileContent->fileSize || closeStatus != 0)
+        return NULL;
     return fileContent->fileBuffer;
 }
 
@@ -49,38 +58,9 @@ int write_file_content(pFileContent fileContent) {
     FILE *pFile = fopen(fileContent->filePath, "wb");
     if (pFile == NULL)
         return -EBADF;
-    fwrite(fileContent->fileBuffer, fileContent->fileSize, 1, pFile);
-    fclose(pFile);
-    return 0;
-}
-
-/**
- * Parse given config.
- *
- * @param fileContent
- * @param config Config info read from config file
- * @retval -EINVAL Give File not found.
- *
- */
-int parse_config(FileContent *fileContent, pConfig config) {
-    // Check file size
-    if (!get_file_size(fileContent))
-        return -EINVAL;
-
-    // Open config file
-    FILE *pConfigFile = fopen(fileContent->filePath, "r");
-    char key[256];
-    uint32_t value = 0;
-
-    // Parse
-    while (fscanf(pConfigFile, "%[^=]=%x\n", key, &value) != EOF) {
-        if (strcmp(key, "StackBase") == 0) {
-            config->StackBase = value;
-        } else if (strcmp(key, "StackSize") == 0) {
-            config->StackSize = value;
-        }
-    }
-
-    fclose(pConfigFile);
-    return 0;
+    size_t written = fwrite(fileContent->fileBuffer, 1,
+                            fileContent->fileSize, pFile);
+    int closeStatus = fclose(pFile);
+    return written == fileContent->fileSize && closeStatus == 0
+        ? 0 : -EBADF;
 }

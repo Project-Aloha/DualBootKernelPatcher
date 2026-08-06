@@ -1,7 +1,12 @@
 .include "DummyHead.S"
 
-/* Shell Code for Ayaneo Pocket S */
-_ShellCodeStart:
+/* Simplified Shim for Ayaneo Pocket S */
+_ShimStart:
+    mov     x19, x0
+    mov     x20, x1
+    mov     x21, x2
+    mov     x22, x3
+    mov     x23, x30
     movz    x4, #0xd000
     movk    x4, #0x0f16, lsl #16    // Store 0xf16d000 to x4, which is io control of gpio109 on sm8550.
     str     wzr, [x4], #4           // Set 0 in control reg, then x4 add 4

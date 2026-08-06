@@ -1,3 +1,3 @@
 .idea
-ShellCode.Epsilon.S
 cmake-build-debug
+build/

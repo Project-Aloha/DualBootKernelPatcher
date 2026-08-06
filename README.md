@@ -1,6 +1,9 @@
-# Dual Boot Kernel Patcher
-> Based On [SurfaceDuoDualBootKernelImagePatcher
+# Multi-Boot Kernel Patcher
+> Inspired by [SurfaceDuoDualBootKernelImagePatcher
 ](https://github.com/WOA-Project/SurfaceDuoDualBootKernelImagePatcher)  
+
+Multi-Boot Kernel Patcher packages a base ARM64 Linux Image, a compatible
+Shim runtime, and multiple bootable images from one INI configuration.
 
 ## Build
   - Preparation
@@ -9,13 +12,16 @@
     + aarch64 GNU Assembler
     + Git
     + CMake
+
   - Clone this repo
     ```
     git clone https://github.com/Project-Aloha/DualBootKernelPatcher
+    cd DualBootKernelPatcher
+    git submodule update --init --recursive
     ```
   - Setup CMake.
     ```
-    cd DualBootKernelPacther
+    cd MultiBootKernelPatcher
     cmake -B output -S .
     ```
   - Build!
@@ -23,19 +29,25 @@
     cmake --build output -j 12
     ```
 ## Usage
-  - Common usage.
+  - Copy and edit configuration file, fill paths in it.
+  - Pack an image from the configuration file.
+    ```sh
+    MultiBootKernelPatcher Config/Shim.Sample.cfg
     ```
-    DualBootKernelPatcher <Kernel Image to Patch> <UEFI FD Image> <Patched Kernel Image Destination> <Config> <ShellCodeBinary>
+  - Unpack a patched image that contains a reversible Manifest.
+    ```sh
+    UnpackTool PatchedKernel unpacked
     ```
-  - Example
-    ```
-    DualBootKernelPatcher kernel SM8150_EFI.fd PacthedKernel DualBoot.Sm8150.cfg ShellCode.Hotdog.bin
-    ```
-  - Notice 
-    + Shell Code binaries can be find under `output/ShellCode/`
-  
+    The output directory contains BaseImage, Shim, image payloads, and
+    `config.cfg`. Edit those files as needed, then repack `config.cfg` to
+    create `RepackedKernel` in the same directory.
+  - Notice
+    + Device Shim blobs are generated under `output/Shims/`.
+    + Images without the current reversible Manifest are not supported by
+      `UnpackTool`.
+
 ## See More
-  - You can go to our [document website](https://aloha.firmware.icu/) to get more infomation about the Dual Boot Patcher.
+  - You can go to our [document website](https://aloha.firmware.icu/) to get more infomation about the Multi-Boot Kernel Patcher.
 
 ## License
   MIT License.
