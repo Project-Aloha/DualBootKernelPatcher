@@ -37,11 +37,11 @@ bool image_inspect_arm64_linux(const FileContent *file,
     static const uint8_t arm64Magic[] = {'A', 'R', 'M', 0x64};
 
     info->headerOffset = 0;
-    if (file->fileSize >= SHIM_WRAPPER_SIZE &&
+    if (file->fileSize >= QC_ABOOT_KERNEL_HDR_SIZE &&
         memcmp(file->fileBuffer, "UNCOMPRESSED_IMG", 0x10) == 0)
-        info->headerOffset = SHIM_WRAPPER_SIZE;
+        info->headerOffset = QC_ABOOT_KERNEL_HDR_SIZE;
 
-    if (file->fileSize < info->headerOffset + SHIM_LINUX_HEADER_SIZE ||
+    if (file->fileSize < info->headerOffset + ARM64_LINUX_IMAGE_HEADER_SIZE ||
         memcmp(file->fileBuffer + info->headerOffset + 0x38,
                arm64Magic, sizeof(arm64Magic)) != 0)
         return false;

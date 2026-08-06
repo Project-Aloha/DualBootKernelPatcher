@@ -12,21 +12,22 @@ _ShimStart:
     sub     x24, x23, #4
 
     // Linux header +0x20/+0x28 contain the runtime-relative Manifest offset
-    // and the full v7 Manifest blob size. A two-entry v7 blob is 384 bytes.
+    // and the full v0.2 Manifest blob size. A two-entry blob is 384 bytes.
     ldr     x25, [x24, #0x20]
     cbz     x25, _Linux
     ldr     x8, [x24, #0x28]
     cmp     x8, #384
     b.lo    _Linux
     add     x25, x24, x25
-    // ShimManifestHeader: magic +0x00, version +0x08, headerSize +0x0c,
+    // ManifestHeader: magic +0x00, version +0x08, headerSize +0x0c,
     // entrySize +0x10 and entryCount +0x14.
     ldr     x8, [x25]
     ldr     x9, _ManifestMagic
     cmp     x8, x9
     b.ne    _Linux
     ldr     w8, [x25, #8]
-    cmp     w8, #7
+    mov     w9, #0x20000
+    cmp     w8, w9
     b.ne    _Linux
     ldr     w8, [x25, #12]
     cmp     w8, #128
@@ -42,14 +43,16 @@ _ShimStart:
     // KernelWrapper reserves it for a DTB payload copied to a fixed address.
     add     x25, x25, #128
     add     x25, x25, #128
-    // ShimManifestEntry: offset +0x20, size +0x28, type +0x30,
+    // ManifestEntry: offset +0x20, size +0x28, type +0x30,
     // flags +0x34 and loadAddress +0x38.
     ldr     w8, [x25, #48]
-    // SHIM_ENTRY_TYPE_DTB is 5; SHIM_ENTRY_FLAG_COPY is bit 1.
+    // SHIM_ENTRY_TYPE_DTB is 5; the reserved DTB entry must carry exactly
+    // SHIM_ENTRY_FLAG_COPY (bit 1) and no other flags.
     cmp     w8, #5
     b.ne    _Linux
     ldr     w8, [x25, #52]
-    tbz     w8, #1, _Linux
+    cmp     w8, #2
+    b.ne    _Linux
 
     // Copy the packed DTB from BaseImage + entry.offset to entry.loadAddress.
     ldr     x8, [x25, #32]

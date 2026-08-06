@@ -111,7 +111,7 @@ static PackImageConfig *find_or_add_image(ConfigParser *parser,
             return &parser->config.images[index];
     }
 
-    if (parser->config.imageCount >= SHIM_MAX_ENTRIES ||
+    if (parser->config.imageCount >= MANIFEST_MAX_ENTRIES ||
         strlen(section) >= sizeof(parser->config.images[0].section))
         return NULL;
 
@@ -186,7 +186,7 @@ static int config_handler(void *user,
                 image->hasCopySizeMax = valid;
             } else if (strcmp(name, "Align") == 0 &&
                        !image->hasAlignment) {
-                valid = parse_u64(value, &image->alignment);
+                valid = parse_u32(value, &image->alignment);
                 image->hasAlignment = valid;
             } else if (strcmp(name, "EntryOffset") == 0 &&
                        !image->hasEntryOffset) {
@@ -251,12 +251,10 @@ static bool validate_config(ConfigParser *parser,
             return false;
         }
         if (!image->hasAlignment)
-            image->alignment = 4;
-        if (image->alignment < IMAGE_BRANCH_ALIGNMENT ||
-            image->alignment > UINT32_MAX ||
-            (image->alignment & (image->alignment - 1)) != 0) {
-            printf("Error: [%s] Align must be a power of two from 4 to "
-                   "0xffffffff.\n", image->section);
+            image->alignment = 2;
+        if (image->alignment < 2 || image->alignment > 31) {
+            printf("Error: [%s] Align must be from 2 to 31.\n",
+                   image->section);
             return false;
         }
         if (image->baseImage) {

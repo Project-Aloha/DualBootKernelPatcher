@@ -1,13 +1,21 @@
 #pragma once
 
-#include "shim_manifest.h"
+#include "manifest.h"
 #include "utils.h"
 
 #include <stdbool.h>
 
-#define IMAGE_LINUX_ALIGNMENT 0x200000U
-#define IMAGE_BRANCH_ALIGNMENT 4U
-#define IMAGE_BRANCH_MAX_OFFSET 0x08000000LL
+#define ARM64_LINUX_IMAGE_HEADER_SIZE 0x40U
+#define ARM64_BRANCH_ALIGNMENT 4U
+#define ARM64_BRANCH_MAX_OFFSET SIZE_MB(128)
+#define QC_ABOOT_KERNEL_HDR_SIZE 0x14U
+
+_Static_assert(MANIFEST_BASE_IMAGE_HEADER_SIZE >=
+               ARM64_LINUX_IMAGE_HEADER_SIZE,
+               "Manifest cannot preserve the ARM64 Linux Image header");
+_Static_assert(MANIFEST_SOURCE_PREFIX_MAX_SIZE >=
+               QC_ABOOT_KERNEL_HDR_SIZE,
+               "Manifest cannot preserve the QC aboot kernel header");
 
 typedef struct {
     size_t headerOffset;

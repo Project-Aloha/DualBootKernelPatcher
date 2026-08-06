@@ -15,6 +15,17 @@
 #include <stdint.h>
 #include <errno.h>
 
+// Sizes
+#define SIZE_1B 1ULL
+#define SIZE_1KB (1024ULL * SIZE_1B)
+#define SIZE_1MB (1024ULL * SIZE_1KB)
+#define SIZE_B(x) ((x) * SIZE_1B)
+#define SIZE_KB(x) ((x) * SIZE_1KB)
+#define SIZE_MB(x) ((x) * SIZE_1MB)
+
+// Bitops
+#define BIT(x) (1ULL << (x))
+
 //
 // Store some file information and file buffer.
 //

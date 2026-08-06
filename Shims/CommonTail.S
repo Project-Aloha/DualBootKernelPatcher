@@ -15,21 +15,22 @@ _UEFI:
     // Linux header +0x20: runtime-relative Manifest offset. Zero means absent.
     ldr     x25, [x24, #0x20]
     cbz     x25, _Linux
-    // Linux header +0x28: full v7 Manifest blob size. A two-entry v7 blob is
+    // Linux header +0x28: full v0.2 Manifest blob size. A two-entry blob is
     // 384 bytes: one 128-byte header and two 128-byte entries.
     ldr     x8, [x24, #0x28]
     cmp     x8, #384
     b.lo    _Linux
     add     x25, x24, x25
 
-    // ShimManifestHeader: magic +0x00, version +0x08, headerSize +0x0c,
+    // ManifestHeader: magic +0x00, version +0x08, headerSize +0x0c,
     // entrySize +0x10 and entryCount +0x14.
     ldr     x8, [x25]
     ldr     x9, _ManifestMagic
     cmp     x8, x9
     b.ne    _Linux
     ldr     w8, [x25, #8]
-    cmp     w8, #7
+    mov     w9, #0x20000
+    cmp     w8, w9
     b.ne    _Linux
     ldr     w8, [x25, #12]
     cmp     w8, #128
@@ -45,7 +46,7 @@ _UEFI:
     // This fixed UEFI path expects entry #1 to be an executable payload.
     add     x25, x25, #128
     add     x25, x25, #128
-    // ShimManifestEntry: offset +0x20, size +0x28, type +0x30,
+    // ManifestEntry: offset +0x20, size +0x28, type +0x30,
     // flags +0x34, loadAddress +0x38 and entryOffset +0x40.
     ldr     w8, [x25, #48]
     cbz     w8, _Linux
@@ -63,6 +64,13 @@ _UEFI:
     ldr     x8, [x25, #32]
     add     x8, x24, x8
     ldr     w9, [x25, #52]
+    // Entry #1 must be executable. Allow only COPY (bit 1) and EXECUTABLE
+    // (bit 2); reject BASE_IMAGE (bit 0), the DTB reference (bit 3) and
+    // unknown bits.
+    tst     w9, #0x4
+    b.eq    _Linux
+    bic     w10, w9, #0x6
+    cbnz    w10, _Linux
     // SHIM_ENTRY_FLAG_COPY is bit 1. Copy before executing when it is set.
     tbz     w9, #1, _ExecuteEntry
     ldr     x9, [x25, #56]

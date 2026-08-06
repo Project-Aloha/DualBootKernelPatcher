@@ -1,6 +1,6 @@
 #pragma once
 
-#include "shim_manifest.h"
+#include "manifest.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -18,7 +18,7 @@ typedef struct {
     int hasCopyAddress;
     uint64_t copySizeMax;
     int hasCopySizeMax;
-    uint64_t alignment;
+    uint32_t alignment;
     int hasAlignment;
     uint64_t entryOffset;
     int hasEntryOffset;
@@ -37,7 +37,7 @@ typedef struct {
     char shim[PACK_PATH_SIZE];
     char output[PACK_PATH_SIZE];
     char defaultSection[32];
-    PackImageConfig images[SHIM_MAX_ENTRIES];
+    PackImageConfig images[MANIFEST_MAX_ENTRIES];
     size_t imageCount;
     size_t baseImageIndex;
     uint32_t defaultEntry;

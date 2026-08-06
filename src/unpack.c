@@ -1,5 +1,5 @@
 #include "image_format.h"
-#include "shim_manifest.h"
+#include "manifest.h"
 
 #include <stdbool.h>
 #include <sys/stat.h>
@@ -15,7 +15,7 @@ typedef struct {
     uint8_t *buffer;
     size_t size;
     size_t headerOffset;
-    const ShimManifest *manifest;
+    const Manifest *manifest;
 } PackedImage;
 
 static bool join_path(char *result, size_t size, const char *directory,
@@ -82,7 +82,8 @@ static bool load_packed(const char *path, PackedImage *packed) {
         return false;
     }
     packed->headerOffset = image.headerOffset;
-    if (packed->size - packed->headerOffset < SHIM_LINUX_HEADER_SIZE) {
+    if (packed->size - packed->headerOffset <
+        ARM64_LINUX_IMAGE_HEADER_SIZE) {
         printf("Error: Input image is truncated.\n");
         return false;
     }
@@ -95,24 +96,26 @@ static bool load_packed(const char *path, PackedImage *packed) {
         runtimeSize != packed->size - packed->headerOffset ||
         !range_inside((size_t)manifestOffset, (size_t)manifestSize,
                       (size_t)runtimeSize) ||
-        manifestSize < sizeof(ShimManifestHeader)) {
+        manifestSize < sizeof(ManifestHeader)) {
         printf("Error: Input image has invalid Manifest bounds.\n");
         return false;
     }
 
     const uint8_t *manifestBuffer = header + (size_t)manifestOffset;
-    if (memcmp(manifestBuffer, SHIM_MANIFEST_MAGIC, 8) != 0 ||
-        image_read_le32(manifestBuffer + 8) != SHIM_MANIFEST_VERSION) {
+    uint32_t version = image_read_le32(manifestBuffer + 8);
+    if (memcmp(manifestBuffer, MANIFEST_MAGIC, 8) != 0 ||
+        (version & 0xffffU) != MANIFEST_VERSION_MAJOR ||
+        (version >> 16) != MANIFEST_VERSION_MINOR) {
         printf("Error: Input image is not a supported reversible image.\n");
         return false;
     }
-    const ShimManifest *manifest = (const ShimManifest *)manifestBuffer;
-    if (manifest->header.headerSize != sizeof(ShimManifestHeader) ||
-        manifest->header.entrySize != sizeof(ShimManifestEntry) ||
+    const Manifest *manifest = (const Manifest *)manifestBuffer;
+    if (manifest->header.headerSize != sizeof(ManifestHeader) ||
+        manifest->header.entrySize != sizeof(ManifestEntry) ||
         manifest->header.entryCount == 0 ||
-        manifest->header.entryCount > SHIM_MAX_ENTRIES ||
+        manifest->header.entryCount > MANIFEST_MAX_ENTRIES ||
         manifest->header.imageSize != runtimeSize ||
-        manifestSize > SHIM_MANIFEST_MAX_SIZE ||
+        manifestSize > MANIFEST_MAX_SIZE ||
         manifest->header.defaultEntry >= manifest->header.entryCount ||
         manifest->header.shimSize == 0 ||
         manifest->header.shimSize > SIZE_MAX) {
@@ -121,8 +124,8 @@ static bool load_packed(const char *path, PackedImage *packed) {
     }
 
     size_t entryCount = manifest->header.entryCount;
-    size_t expectedManifestSize = sizeof(ShimManifestHeader) +
-        entryCount * sizeof(ShimManifestEntry);
+    size_t expectedManifestSize = sizeof(ManifestHeader) +
+        entryCount * sizeof(ManifestEntry);
     if (manifestSize != expectedManifestSize) {
         printf("Error: Input image has an invalid Manifest size.\n");
         return false;
@@ -142,7 +145,7 @@ static bool load_packed(const char *path, PackedImage *packed) {
         return false;
     }
     for (size_t index = 0; index < entryCount; index++) {
-        const ShimManifestEntry *entry = &manifest->entries[index];
+        const ManifestEntry *entry = &manifest->entries[index];
         if (manifest_entry_type_name(entry->type) == NULL ||
             !valid_name(entry->name) ||
             entry->offset > SIZE_MAX || entry->size > SIZE_MAX ||
@@ -157,23 +160,31 @@ static bool load_packed(const char *path, PackedImage *packed) {
 
     if (manifest->entries[0].offset != 0 ||
         manifest->entries[0].type != SHIM_ENTRY_TYPE_LINUX ||
-        manifest->entries[0].flags != SHIM_ENTRY_FLAG_BASE_IMAGE ||
-        manifest->entries[0].size < SHIM_LINUX_HEADER_SIZE)
+        (manifest->entries[0].flags &
+         (SHIM_ENTRY_FLAG_BASE_IMAGE | SHIM_ENTRY_FLAG_EXECUTABLE)) !=
+            (SHIM_ENTRY_FLAG_BASE_IMAGE | SHIM_ENTRY_FLAG_EXECUTABLE) ||
+        (manifest->entries[0].flags & ~(SHIM_ENTRY_FLAG_BASE_IMAGE |
+                                        SHIM_ENTRY_FLAG_EXECUTABLE |
+                                        SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB)) !=
+            0 ||
+        manifest->entries[0].size < ARM64_LINUX_IMAGE_HEADER_SIZE)
         return false;
     size_t shimEnd = primarySlot + shimSize;
     for (size_t index = 0; index < entryCount; index++) {
-        const ShimManifestEntry *entry = &manifest->entries[index];
+        const ManifestEntry *entry = &manifest->entries[index];
         uint32_t allowedFlags = index == 0
-            ? SHIM_ENTRY_FLAG_BASE_IMAGE
-            : SHIM_ENTRY_FLAG_COPY;
+            ? SHIM_ENTRY_FLAG_BASE_IMAGE | SHIM_ENTRY_FLAG_EXECUTABLE |
+              SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB
+            : SHIM_ENTRY_FLAG_COPY | SHIM_ENTRY_FLAG_EXECUTABLE |
+              SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB;
         bool copyImage = (entry->flags & SHIM_ENTRY_FLAG_COPY) != 0;
+        bool executable =
+            (entry->flags & SHIM_ENTRY_FLAG_EXECUTABLE) != 0;
+        bool hasDtb =
+            (entry->flags & SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB) != 0;
         if ((entry->flags & ~allowedFlags) != 0 ||
-            entry->alignment < IMAGE_BRANCH_ALIGNMENT ||
-            entry->alignment > UINT32_MAX ||
-            (entry->alignment & (entry->alignment - 1)) != 0 ||
-            entry->sourcePrefixSize > SHIM_WRAPPER_SIZE ||
-            (entry->sourcePrefixSize != 0 &&
-             entry->sourcePrefixSize != SHIM_WRAPPER_SIZE) ||
+            entry->alignment < 2 || entry->alignment > 31 ||
+            entry->sourcePrefixSize > MANIFEST_SOURCE_PREFIX_MAX_SIZE ||
             (copyImage &&
              (entry->loadAddress == 0 || entry->copySizeMax == 0 ||
               entry->size > entry->copySizeMax)) ||
@@ -181,8 +192,17 @@ static bool load_packed(const char *path, PackedImage *packed) {
             printf("Error: Input image has invalid Manifest metadata.\n");
             return false;
         }
-        if (entry->deviceTreeBlobEntry != SHIM_NO_DEVICE_TREE_BLOB) {
-            if (!manifest_entry_type_is_executable(entry->type) ||
+        if (executable != manifest_entry_type_is_executable(entry->type)) {
+            printf("Error: Input image has inconsistent executable metadata.\n");
+            return false;
+        }
+        if (!hasDtb && entry->deviceTreeBlobEntry != 0) {
+            printf("Error: Input image has a stale DeviceTreeBlob "
+                   "reference.\n");
+            return false;
+        }
+        if (hasDtb) {
+            if (!executable ||
                 entry->deviceTreeBlobEntry >= entryCount ||
                 manifest->entries[entry->deviceTreeBlobEntry].type !=
                     SHIM_ENTRY_TYPE_DTB ||
@@ -203,7 +223,7 @@ static bool load_packed(const char *path, PackedImage *packed) {
             return false;
         }
         for (size_t previous = 1; previous < index; previous++) {
-            const ShimManifestEntry *other = &manifest->entries[previous];
+            const ManifestEntry *other = &manifest->entries[previous];
             if (ranges_overlap((size_t)entry->offset, (size_t)entry->size,
                                (size_t)other->offset,
                                (size_t)other->size)) {
@@ -219,7 +239,7 @@ static bool load_packed(const char *path, PackedImage *packed) {
 
 static bool restore_files(const PackedImage *packed, const char *directory) {
     char path[UNPACK_PATH_SIZE * 2];
-    const ShimManifest *manifest = packed->manifest;
+    const Manifest *manifest = packed->manifest;
     size_t entryCount = manifest->header.entryCount;
     size_t primarySlot = (size_t)image_read_le64(
         packed->buffer + packed->headerOffset + 0x30);
@@ -234,9 +254,9 @@ static bool restore_files(const PackedImage *packed, const char *directory) {
     memcpy(base.fileBuffer, manifest->header.baseImageHeader,
            sizeof(manifest->header.baseImageHeader));
     {
-        const ShimManifestEntry *baseEntry = &manifest->entries[0];
+        const ManifestEntry *baseEntry = &manifest->entries[0];
         size_t prefixSize = baseEntry->sourcePrefixSize;
-        if (prefixSize > SHIM_WRAPPER_SIZE ||
+        if (prefixSize > MANIFEST_SOURCE_PREFIX_MAX_SIZE ||
             !join_path(path, sizeof(path), directory, "BaseImage") ||
             prefixSize + base.fileSize > SIZE_MAX) {
             free(base.fileBuffer);
@@ -263,14 +283,14 @@ static bool restore_files(const PackedImage *packed, const char *directory) {
         return false;
 
     for (size_t index = 1; index < entryCount; index++) {
-        const ShimManifestEntry *entry = &manifest->entries[index];
+        const ManifestEntry *entry = &manifest->entries[index];
         const char *typeName = manifest_entry_type_name(entry->type);
         char name[64];
         snprintf(name, sizeof(name), "Image-%02zu-%s", index, typeName);
         if (!join_path(path, sizeof(path), directory, name))
             return false;
         size_t prefixSize = entry->sourcePrefixSize;
-        if (prefixSize > SHIM_WRAPPER_SIZE ||
+        if (prefixSize > MANIFEST_SOURCE_PREFIX_MAX_SIZE ||
             prefixSize + (size_t)entry->size < prefixSize)
             return false;
         size_t outputSize = prefixSize + (size_t)entry->size;
@@ -297,12 +317,12 @@ static bool write_config(const PackedImage *packed, const char *directory) {
     if (file == NULL)
         return false;
 
-    const ShimManifest *manifest = packed->manifest;
+    const Manifest *manifest = packed->manifest;
         fprintf(file, "[Pack]\nShim=Shim.bin\nOutput=RepackedKernel\n");
         fprintf(file, "Default=Image-%02u\nTimeout=%u\n\n",
             manifest->header.defaultEntry, manifest->header.timeoutMs);
     for (size_t index = 0; index < manifest->header.entryCount; index++) {
-        const ShimManifestEntry *entry = &manifest->entries[index];
+        const ManifestEntry *entry = &manifest->entries[index];
         const char *typeName = manifest_entry_type_name(entry->type);
         fprintf(file, "[Image-%02zu]\nName=%s\n", index, entry->name);
         if (index == 0)
@@ -312,17 +332,17 @@ static bool write_config(const PackedImage *packed, const char *directory) {
             snprintf(name, sizeof(name), "Image-%02zu-%s", index, typeName);
             fprintf(file, "Path=%s\n", name);
         }
-        fprintf(file, "Type=%s\nBaseImage=%s\nAlign=0x%llx\n",
+        fprintf(file, "Type=%s\nBaseImage=%s\nAlign=%llu\n",
                 typeName, index == 0 ? "true" : "false",
             (unsigned long long)entry->alignment);
         if (entry->flags & SHIM_ENTRY_FLAG_COPY)
             fprintf(file, "CopyTo=0x%llx\nCopySizeMax=0x%llx\n",
                     (unsigned long long)entry->loadAddress,
                 (unsigned long long)entry->copySizeMax);
-        if (manifest_entry_type_is_executable(entry->type))
+        if (entry->flags & SHIM_ENTRY_FLAG_EXECUTABLE)
             fprintf(file, "EntryOffset=0x%llx\n",
                     (unsigned long long)entry->entryOffset);
-        if (entry->deviceTreeBlobEntry != SHIM_NO_DEVICE_TREE_BLOB)
+        if (entry->flags & SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB)
             fprintf(file, "DeviceTreeBlob=Image-%02llu\n",
                 (unsigned long long)entry->deviceTreeBlobEntry);
         fprintf(file, "\n");
