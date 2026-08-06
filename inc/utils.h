@@ -9,11 +9,11 @@
 
 #pragma once
 
+#include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-#include <errno.h>
 
 // Sizes
 #define SIZE_1B 1ULL
@@ -30,9 +30,9 @@
 // Store some file information and file buffer.
 //
 typedef struct {
-    uint8_t *fileBuffer;
-    size_t fileSize;
-    const char *filePath;
+  uint8_t    *fileBuffer;
+  size_t      fileSize;
+  const char *filePath;
 } FileContent, *pFileContent;
 
 size_t get_file_size(FileContent *fileContent);

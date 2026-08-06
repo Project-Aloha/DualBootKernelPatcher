@@ -6,17 +6,19 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "log.h"
 #include "pack.h"
 
 #include <errno.h>
 #include <stdio.h>
 
-int main(int argc, char *argv[]) {
-    printf("Multi-Boot Kernel Patcher v2.0.0.0\n");
-    printf("Copyright (c) The DuoWoA & The AlohaWoA authors\n");
-    if (argc != 2) {
-        printf("Usage: MultiBootKernelPatcher <Config File>\n");
-        return -EINVAL;
-    }
-    return PackConfigFile(argv[1]);
+int main(int argc, char *argv[])
+{
+  log_info("Multi-Boot Kernel Patcher v2.0.0.0");
+  log_info("Copyright (c) The DuoWoA & The AlohaWoA authors");
+  if (argc != 2) {
+    log_err("Usage: MultiBootKernelPatcher <Config File>");
+    return -EINVAL;
+  }
+  return PackConfigFile(argv[1]);
 }
