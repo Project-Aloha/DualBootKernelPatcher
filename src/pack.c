@@ -87,14 +87,15 @@ int PackImage(const PackConfig *config)
   bool                   writeManifest = config->manifest.present;
   int                    status        = -EINVAL;
 
-  FileContent primary = {.filePath = baseImage->path};
-  FileContent shim    = {.filePath = config->shim};
-  FileContent output  = {.filePath = config->output};
+  FileContent primary  = {.filePath = baseImage->path};
+  FileContent shim     = {.filePath = config->shim};
+  FileContent output   = {.filePath = config->output};
+  Manifest   *manifest = NULL;
 
   if (!load_file(&primary) || !load_file(&shim))
     goto cleanup;
-  if (shim.fileSize == 0) {
-    log_err("Shim must be a non-empty blob.");
+  if (shim.fileSize < ARM64_BRANCH_ALIGNMENT) {
+    log_err("Shim must contain at least one ARM64 instruction.");
     goto cleanup;
   }
 
@@ -129,26 +130,36 @@ int PackImage(const PackConfig *config)
       output.fileBuffer + primaryInfo.headerOffset + primarySlot,
       shim.fileBuffer, shim.fileSize);
 
-  ManifestStorage manifest = {0};
-  memcpy(manifest.header.magic, MANIFEST_MAGIC, 8);
-  manifest.header.version.major = MANIFEST_VERSION_MAJOR;
-  manifest.header.version.minor = MANIFEST_VERSION_MINOR;
-  manifest.header.headerSize    = sizeof(ManifestHeader);
-  manifest.header.entrySize     = sizeof(ManifestEntry);
-  manifest.header.entryCount    = (uint32_t)config->imageCount;
-  manifest.header.defaultEntry  = config->defaultEntry;
-  manifest.header.timeoutMs     = config->timeoutMs;
-  manifest.header.shimSize      = shim.fileSize;
-  memcpy(
-      manifest.header.baseImageHeader,
-      primary.fileBuffer + primaryInfo.headerOffset,
-      sizeof(manifest.header.baseImageHeader));
+  size_t manifestEntryCount = config->imageCount + 1;
+  size_t manifestSize = sizeof(ManifestHeader) +
+                        manifestEntryCount * sizeof(ManifestEntry);
+  manifest = calloc(1, manifestSize);
+  if (manifest == NULL)
+    goto cleanup;
+  manifest->header.magic         = MANIFEST_MAGIC;
+  manifest->header.version.major = MANIFEST_VERSION_MAJOR;
+  manifest->header.version.minor = MANIFEST_VERSION_MINOR;
+  manifest->header.headerSize    = sizeof(ManifestHeader);
+  manifest->header.entrySize     = sizeof(ManifestEntry);
+  manifest->header.entryCount    = (uint32_t)manifestEntryCount;
+  manifest->header.defaultEntry  = config->defaultEntry;
+  manifest->header.timeoutMs     = config->timeoutMs;
+    const uint8_t *originalHeader =
+      primary.fileBuffer + primaryInfo.headerOffset;
+    manifest->header.baseImageInstructions = image_read_le64(originalHeader);
+    manifest->header.baseImageImageSize = image_read_le64(originalHeader + 0x10);
+    manifest->header.baseImageManifestOffset =
+      image_read_le64(originalHeader + 0x20);
+    manifest->header.baseImageManifestSize =
+      image_read_le64(originalHeader + 0x28);
+    manifest->header.baseImageShimOffset =
+      image_read_le64(originalHeader + 0x30);
 
   uint8_t *kernelHeader = output.fileBuffer + primaryInfo.headerOffset;
   if (!patch_kernel_entry(kernelHeader, primarySlot))
     goto cleanup;
 
-  ManifestEntry *baseEntry = &manifest.entries[0];
+  ManifestEntry *baseEntry = &manifest->entries[0];
   memcpy(baseEntry->name, baseImage->name, strlen(baseImage->name) + 1);
   baseEntry->type        = SHIM_ENTRY_TYPE_LINUX;
   baseEntry->entryOffset = baseImage->entryOffset;
@@ -253,7 +264,7 @@ int PackImage(const PackConfig *config)
         output.fileBuffer + primaryInfo.headerOffset + imageOffset,
         extra.fileBuffer + payloadOffset, payloadSize);
 
-    ManifestEntry *entry = &manifest.entries[manifestIndex++];
+    ManifestEntry *entry = &manifest->entries[manifestIndex++];
     memcpy(entry->name, image->name, strlen(image->name) + 1);
     entry->type             = image->type;
     entry->entryOffset      = image->entryOffset;
@@ -277,25 +288,28 @@ int PackImage(const PackConfig *config)
     free(extra.fileBuffer);
   }
 
+  ManifestEntry *shimEntry = &manifest->entries[manifestIndex];
+  memcpy(shimEntry->name, "Attached Shim", sizeof("Attached Shim"));
+  shimEntry->offset      = primarySlot;
+  shimEntry->size        = shim.fileSize;
+  shimEntry->type        = SHIM_ENTRY_TYPE_SHIM;
+  shimEntry->flags       = SHIM_ENTRY_FLAG_EXECUTABLE;
+  shimEntry->alignment   = 2;
+
   size_t manifestOffset = 0;
-  size_t manifestSize   = 0;
   if (writeManifest) {
-    manifestSize = sizeof(ManifestHeader) +
-                   manifest.header.entryCount * sizeof(ManifestEntry);
     size_t oldRuntimeSize = output.fileSize - primaryInfo.headerOffset;
     if (!image_align_up(oldRuntimeSize, sizeof(uint64_t), &manifestOffset)) {
       log_err("Failed to align manifest.");
       goto cleanup;
     }
     size_t manifestFileOffset = primaryInfo.headerOffset + manifestOffset;
-    if (manifestSize > MANIFEST_MAX_SIZE ||
-        manifestSize > SIZE_MAX - manifestFileOffset ||
-        !resize_output(&output, manifestFileOffset + manifestSize)) {
+    if (!resize_output(&output, manifestFileOffset + manifestSize)) {
       log_err("Failed to append manifest.");
       goto cleanup;
     }
-    manifest.header.imageSize = manifestOffset + manifestSize;
-    memcpy(output.fileBuffer + manifestFileOffset, &manifest, manifestSize);
+    manifest->header.imageSize = manifestOffset + manifestSize;
+    memcpy(output.fileBuffer + manifestFileOffset, manifest, manifestSize);
   }
 
   size_t runtimeImageSize = output.fileSize - primaryInfo.headerOffset;
@@ -336,5 +350,6 @@ cleanup:
   free(primary.fileBuffer);
   free(shim.fileBuffer);
   free(output.fileBuffer);
+  free(manifest);
   return status;
 }

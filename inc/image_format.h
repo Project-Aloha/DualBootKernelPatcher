@@ -11,9 +11,6 @@
 #define QC_ABOOT_KERNEL_HDR_SIZE 0x14U
 
 _Static_assert(
-    MANIFEST_BASE_IMAGE_HEADER_SIZE >= ARM64_LINUX_IMAGE_HEADER_SIZE,
-    "Manifest cannot preserve the ARM64 Linux Image header");
-_Static_assert(
     MANIFEST_SOURCE_PREFIX_MAX_SIZE >= QC_ABOOT_KERNEL_HDR_SIZE,
     "Manifest cannot preserve the QC aboot kernel header");
 

@@ -110,22 +110,19 @@ static bool load_packed(const char *path, PackedImage *packed)
   }
 
   const uint8_t *manifestBuffer = header + (size_t)manifestOffset;
-  uint32_t       version        = image_read_le32(manifestBuffer + 8);
-  if (memcmp(manifestBuffer, MANIFEST_MAGIC, 8) != 0 ||
-      (version & 0xffffU) != MANIFEST_VERSION_MAJOR ||
-      (version >> 16) != MANIFEST_VERSION_MINOR) {
+  const Manifest *manifest = (const Manifest *)manifestBuffer;
+  if (manifest->header.magic != MANIFEST_MAGIC ||
+      manifest->header.version.major != MANIFEST_VERSION_MAJOR ||
+      manifest->header.version.minor != MANIFEST_VERSION_MINOR) {
     log_err("Input image is not a supported reversible image.");
     return false;
   }
-  const Manifest *manifest = (const Manifest *)manifestBuffer;
   if (manifest->header.headerSize != sizeof(ManifestHeader) ||
       manifest->header.entrySize != sizeof(ManifestEntry) ||
       manifest->header.entryCount == 0 ||
       manifest->header.entryCount > MANIFEST_MAX_ENTRIES ||
       manifest->header.imageSize != runtimeSize ||
-      manifestSize > MANIFEST_MAX_SIZE ||
-      manifest->header.defaultEntry >= manifest->header.entryCount ||
-      manifest->header.shimSize == 0 || manifest->header.shimSize > SIZE_MAX) {
+      manifest->header.defaultEntry >= manifest->header.entryCount) {
     log_err("Input image has an invalid Manifest.");
     return false;
   }
@@ -139,14 +136,19 @@ static bool load_packed(const char *path, PackedImage *packed)
   }
 
   uint64_t primarySlotValue = image_read_le64(header + 0x30);
-  if (primarySlotValue == 0 || primarySlotValue > SIZE_MAX) {
+  if (entryCount < 2 || primarySlotValue == 0 || primarySlotValue > SIZE_MAX) {
     log_err("Input image has invalid Shim bounds.");
     return false;
   }
-  size_t primarySlot = (size_t)primarySlotValue;
-  size_t shimSize    = (size_t)manifest->header.shimSize;
-  if (shimSize > SIZE_MAX - primarySlot ||
-      !range_inside(primarySlot, shimSize, (size_t)manifestOffset)) {
+  size_t               primarySlot       = (size_t)primarySlotValue;
+  size_t               attachedShimIndex = entryCount - 1;
+  const ManifestEntry *attachedShim      =
+      &manifest->entries[attachedShimIndex];
+  if (manifest->header.defaultEntry == attachedShimIndex ||
+      attachedShim->type != SHIM_ENTRY_TYPE_SHIM ||
+      attachedShim->flags != SHIM_ENTRY_FLAG_EXECUTABLE ||
+      attachedShim->offset != primarySlot || attachedShim->size == 0 ||
+      attachedShim->entryOffset != 0) {
     log_err("Input image has invalid Shim bounds.");
     return false;
   }
@@ -175,7 +177,8 @@ static bool load_packed(const char *path, PackedImage *packed)
          SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB)) != 0 ||
       manifest->entries[0].size < ARM64_LINUX_IMAGE_HEADER_SIZE)
     return false;
-  size_t shimEnd = primarySlot + shimSize;
+  size_t attachedShimEnd =
+      (size_t)attachedShim->offset + (size_t)attachedShim->size;
   for (size_t index = 0; index < entryCount; index++) {
     const ManifestEntry *entry = &manifest->entries[index];
     uint32_t             allowedFlags =
@@ -219,12 +222,6 @@ static bool load_packed(const char *path, PackedImage *packed)
         return false;
       continue;
     }
-    if (ranges_overlap(
-            (size_t)entry->offset, (size_t)entry->size, primarySlot,
-            shimSize)) {
-      log_err("Manifest entry overlaps the attached Shim.");
-      return false;
-    }
     for (size_t previous = 1; previous < index; previous++) {
       const ManifestEntry *other = &manifest->entries[previous];
       if (ranges_overlap(
@@ -234,7 +231,8 @@ static bool load_packed(const char *path, PackedImage *packed)
         return false;
       }
     }
-    if ((size_t)entry->offset < shimEnd)
+    if (index != attachedShimIndex &&
+        (size_t)entry->offset < attachedShimEnd)
       return false;
   }
   return true;
@@ -242,11 +240,12 @@ static bool load_packed(const char *path, PackedImage *packed)
 
 static bool restore_files(const PackedImage *packed, const char *directory)
 {
-  char            path[UNPACK_PATH_SIZE * 2];
-  const Manifest *manifest   = packed->manifest;
-  size_t          entryCount = manifest->header.entryCount;
-  size_t          primarySlot =
-      (size_t)image_read_le64(packed->buffer + packed->headerOffset + 0x30);
+  char                 path[UNPACK_PATH_SIZE * 2];
+  const Manifest      *manifest          = packed->manifest;
+  size_t               entryCount        = manifest->header.entryCount;
+  size_t               attachedShimIndex = entryCount - 1;
+  const ManifestEntry *attachedShim      =
+      &manifest->entries[attachedShimIndex];
 
   FileContent base = {0};
   base.fileSize    = (size_t)manifest->entries[0].size;
@@ -254,9 +253,15 @@ static bool restore_files(const PackedImage *packed, const char *directory)
   if (base.fileBuffer == NULL)
     return false;
   memcpy(base.fileBuffer, packed->buffer + packed->headerOffset, base.fileSize);
-  memcpy(
-      base.fileBuffer, manifest->header.baseImageHeader,
-      sizeof(manifest->header.baseImageHeader));
+    image_write_le64(base.fileBuffer, manifest->header.baseImageInstructions);
+    image_write_le64(
+      base.fileBuffer + 0x10, manifest->header.baseImageImageSize);
+    image_write_le64(
+      base.fileBuffer + 0x20, manifest->header.baseImageManifestOffset);
+    image_write_le64(
+      base.fileBuffer + 0x28, manifest->header.baseImageManifestSize);
+    image_write_le64(
+      base.fileBuffer + 0x30, manifest->header.baseImageShimOffset);
   {
     const ManifestEntry *baseEntry  = &manifest->entries[0];
     size_t               prefixSize = baseEntry->sourcePrefixSize;
@@ -283,11 +288,11 @@ static bool restore_files(const PackedImage *packed, const char *directory)
 
   if (!join_path(path, sizeof(path), directory, "Shim.bin") ||
       !write_buffer(
-          path, packed->buffer + packed->headerOffset + primarySlot,
-          (size_t)manifest->header.shimSize))
+          path, packed->buffer + packed->headerOffset + attachedShim->offset,
+          (size_t)attachedShim->size))
     return false;
 
-  for (size_t index = 1; index < entryCount; index++) {
+  for (size_t index = 1; index < attachedShimIndex; index++) {
     const ManifestEntry *entry    = &manifest->entries[index];
     const char          *typeName = manifest_entry_type_name(entry->type);
     char                 name[64];
@@ -329,7 +334,7 @@ static bool write_config(const PackedImage *packed, const char *directory)
   fprintf(
       file, "Default=Image-%02u\nTimeout=%u\n\n", manifest->header.defaultEntry,
       manifest->header.timeoutMs);
-  for (size_t index = 0; index < manifest->header.entryCount; index++) {
+  for (size_t index = 0; index + 1 < manifest->header.entryCount; index++) {
     const ManifestEntry *entry    = &manifest->entries[index];
     const char          *typeName = manifest_entry_type_name(entry->type);
     fprintf(file, "[Image-%02zu]\nName=%s\n", index, entry->name);

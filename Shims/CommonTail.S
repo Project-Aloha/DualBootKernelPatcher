@@ -15,37 +15,38 @@ _UEFI:
     // Linux header +0x20: runtime-relative Manifest offset. Zero means absent.
     ldr     x25, [x24, #0x20]
     cbz     x25, _Linux
-    // Linux header +0x28: full v0.2 Manifest blob size. A two-entry blob is
-    // 384 bytes: one 128-byte header and two 128-byte entries.
+    // Linux header +0x28: full Manifest blob size. Two entries require
+    // one 76-byte header and two 120-byte entries.
     ldr     x8, [x24, #0x28]
-    cmp     x8, #384
+    cmp     x8, #316
     b.lo    _Linux
     add     x25, x24, x25
 
-    // ManifestHeader: magic +0x00, version +0x08, headerSize +0x0c,
-    // entrySize +0x10 and entryCount +0x14.
-    ldr     x8, [x25]
-    ldr     x9, _ManifestMagic
-    cmp     x8, x9
-    b.ne    _Linux
-    ldr     w8, [x25, #8]
-    mov     w9, #0x20000
+    // ManifestHeader: magic +0x00, version +0x04, headerSize +0x10,
+    // entrySize +0x14 and entryCount +0x18.
+    ldr     w8, [x25]
+    movz    w9, #0x504b
+    movk    w9, #0x464d, lsl #16
     cmp     w8, w9
     b.ne    _Linux
-    ldr     w8, [x25, #12]
-    cmp     w8, #128
+    ldr     w8, [x25, #4]
+    mov     w9, #0x10000
+    cmp     w8, w9
     b.ne    _Linux
     ldr     w8, [x25, #16]
-    cmp     w8, #128
+    cmp     w8, #76
     b.ne    _Linux
     ldr     w8, [x25, #20]
+    cmp     w8, #120
+    b.ne    _Linux
+    ldr     w8, [x25, #24]
     cmp     w8, #2
     b.lo    _Linux
 
-    // Entry #1 follows the 128-byte header and BaseImage entry (#0).
+    // Entry #1 follows the header and BaseImage entry (#0).
     // This fixed UEFI path expects entry #1 to be an executable payload.
-    add     x25, x25, #128
-    add     x25, x25, #128
+    add     x25, x25, #76
+    add     x25, x25, #120
     // ManifestEntry: offset +0x20, size +0x28, type +0x30,
     // flags +0x34, loadAddress +0x38 and entryOffset +0x40.
     ldr     w8, [x25, #48]
@@ -137,10 +138,6 @@ _SyncImageCache:
 
 _Dead:
     b       _Dead
-
-.align 3
-_ManifestMagic:
-    .ascii  "SHIMMF\0\0"
 
 .text
 .align 4

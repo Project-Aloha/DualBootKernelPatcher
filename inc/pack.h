@@ -37,7 +37,7 @@ typedef struct {
   char               shim[PACK_PATH_SIZE];
   char               output[PACK_PATH_SIZE];
   char               defaultSection[32];
-  PackImageConfig    images[MANIFEST_MAX_ENTRIES];
+  PackImageConfig    images[MANIFEST_MAX_ENTRIES - 1];
   size_t             imageCount;
   size_t             baseImageIndex;
   uint32_t           defaultEntry;

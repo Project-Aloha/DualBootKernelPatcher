@@ -116,7 +116,7 @@ find_or_add_image(ConfigParser *parser, const char *section)
       return &parser->config.images[index];
   }
 
-  if (parser->config.imageCount >= MANIFEST_MAX_ENTRIES ||
+  if (parser->config.imageCount >= MANIFEST_MAX_ENTRIES - 1 ||
       strlen(section) >= sizeof(parser->config.images[0].section))
     return NULL;
 

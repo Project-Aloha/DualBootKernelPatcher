@@ -5,12 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MANIFEST_MAGIC "SHIMMF\0"
+#define MANIFEST_MAGIC 0x464D504BUL // 'K', 'P', 'M', 'F'
 #define MANIFEST_VERSION_MAJOR 0U
-#define MANIFEST_VERSION_MINOR 2U
-#define MANIFEST_MAX_SIZE 0x2000U
+#define MANIFEST_VERSION_MINOR 1U
 #define MANIFEST_MAX_ENTRIES 50U
-#define MANIFEST_BASE_IMAGE_HEADER_SIZE 0x40U
 #define MANIFEST_SOURCE_PREFIX_MAX_SIZE 0x14U
 
 typedef enum {
@@ -41,20 +39,22 @@ _Static_assert(
 #pragma pack(1)
 
 typedef struct {
-  char            magic[8];
+  uint32_t        magic;
   ManifestVersion version;
+  uint64_t        imageSize;
   uint32_t        headerSize;
   uint32_t        entrySize;
   uint32_t        entryCount;
   uint32_t        defaultEntry;
   uint32_t        timeoutMs;
-  uint64_t        imageSize;
-  uint64_t        shimSize;
-  uint8_t         baseImageHeader[MANIFEST_BASE_IMAGE_HEADER_SIZE];
-  uint8_t         reserved[16];
+  uint64_t        baseImageInstructions;
+  uint64_t        baseImageImageSize;
+  uint64_t        baseImageManifestOffset;
+  uint64_t        baseImageManifestSize;
+  uint64_t        baseImageShimOffset;
 } ManifestHeader;
 
-_Static_assert(sizeof(ManifestHeader) == 128, "Invalid manifest header size");
+_Static_assert(sizeof(ManifestHeader) == 76, "Invalid manifest header size");
 
 typedef struct {
   char     name[32];
@@ -69,23 +69,13 @@ typedef struct {
   uint64_t copySizeMax;
   uint32_t sourcePrefixSize;
   uint8_t  sourcePrefix[MANIFEST_SOURCE_PREFIX_MAX_SIZE];
-  uint8_t  reserved[8];
 } ManifestEntry;
 
-_Static_assert(sizeof(ManifestEntry) == 128, "Invalid manifest entry size");
+_Static_assert(sizeof(ManifestEntry) == 120, "Invalid manifest entry size");
 
 typedef struct {
   ManifestHeader header;
   ManifestEntry  entries[];
 } Manifest;
-
-typedef struct {
-  ManifestHeader header;
-  ManifestEntry  entries[MANIFEST_MAX_ENTRIES];
-} ManifestStorage;
-
-_Static_assert(
-    sizeof(ManifestStorage) <= MANIFEST_MAX_SIZE,
-    "Manifest exceeds its maximum size");
 
 #pragma pack()
