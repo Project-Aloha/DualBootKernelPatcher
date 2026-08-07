@@ -16,14 +16,13 @@ _UEFI:
     ldr     x25, [x24, #0x20]
     cbz     x25, _Linux
     // Linux header +0x28: full Manifest blob size. Two entries require
-    // one 76-byte header and two 120-byte entries.
+    // one 60-byte header and two 108-byte entries.
     ldr     x8, [x24, #0x28]
-    cmp     x8, #316
+    cmp     x8, #276
     b.lo    _Linux
     add     x25, x24, x25
 
-    // ManifestHeader: magic +0x00, version +0x04, headerSize +0x10,
-    // entrySize +0x14 and entryCount +0x18.
+    // ManifestHeader: magic +0x00, version +0x04 and entryCount +0x08.
     ldr     w8, [x25]
     movz    w9, #0x504b
     movk    w9, #0x464d, lsl #16
@@ -33,19 +32,13 @@ _UEFI:
     mov     w9, #0x10000
     cmp     w8, w9
     b.ne    _Linux
-    ldr     w8, [x25, #16]
-    cmp     w8, #76
-    b.ne    _Linux
-    ldr     w8, [x25, #20]
-    cmp     w8, #120
-    b.ne    _Linux
-    ldr     w8, [x25, #24]
+    ldr     w8, [x25, #8]
     cmp     w8, #2
     b.lo    _Linux
 
     // Entry #1 follows the header and BaseImage entry (#0).
     // This fixed UEFI path expects entry #1 to be an executable payload.
-    add     x25, x25, #76
+    add     x25, x25, #60
     add     x25, x25, #120
     // ManifestEntry: offset +0x20, size +0x28, type +0x30,
     // flags +0x34, loadAddress +0x38 and entryOffset +0x40.

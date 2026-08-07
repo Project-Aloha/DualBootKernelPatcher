@@ -109,19 +109,16 @@ static bool load_packed(const char *path, PackedImage *packed)
     return false;
   }
 
-  const uint8_t *manifestBuffer = header + (size_t)manifestOffset;
-  const Manifest *manifest = (const Manifest *)manifestBuffer;
+  const uint8_t  *manifestBuffer = header + (size_t)manifestOffset;
+  const Manifest *manifest       = (const Manifest *)manifestBuffer;
   if (manifest->header.magic != MANIFEST_MAGIC ||
       manifest->header.version.major != MANIFEST_VERSION_MAJOR ||
       manifest->header.version.minor != MANIFEST_VERSION_MINOR) {
     log_err("Input image is not a supported reversible image.");
     return false;
   }
-  if (manifest->header.headerSize != sizeof(ManifestHeader) ||
-      manifest->header.entrySize != sizeof(ManifestEntry) ||
-      manifest->header.entryCount == 0 ||
+  if (manifest->header.entryCount == 0 ||
       manifest->header.entryCount > MANIFEST_MAX_ENTRIES ||
-      manifest->header.imageSize != runtimeSize ||
       manifest->header.defaultEntry >= manifest->header.entryCount) {
     log_err("Input image has an invalid Manifest.");
     return false;
@@ -142,8 +139,7 @@ static bool load_packed(const char *path, PackedImage *packed)
   }
   size_t               primarySlot       = (size_t)primarySlotValue;
   size_t               attachedShimIndex = entryCount - 1;
-  const ManifestEntry *attachedShim      =
-      &manifest->entries[attachedShimIndex];
+  const ManifestEntry *attachedShim = &manifest->entries[attachedShimIndex];
   if (manifest->header.defaultEntry == attachedShimIndex ||
       attachedShim->type != SHIM_ENTRY_TYPE_SHIM ||
       attachedShim->flags != SHIM_ENTRY_FLAG_EXECUTABLE ||
@@ -184,7 +180,7 @@ static bool load_packed(const char *path, PackedImage *packed)
     uint32_t             allowedFlags =
         index == 0 ? SHIM_ENTRY_FLAG_BASE_IMAGE | SHIM_ENTRY_FLAG_EXECUTABLE |
                          SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB
-                               : SHIM_ENTRY_FLAG_COPY | SHIM_ENTRY_FLAG_EXECUTABLE |
+                   : SHIM_ENTRY_FLAG_COPY | SHIM_ENTRY_FLAG_EXECUTABLE |
                          SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB;
     bool copyImage  = (entry->flags & SHIM_ENTRY_FLAG_COPY) != 0;
     bool executable = (entry->flags & SHIM_ENTRY_FLAG_EXECUTABLE) != 0;
@@ -203,8 +199,9 @@ static bool load_packed(const char *path, PackedImage *packed)
       return false;
     }
     if (!hasDtb && entry->deviceTreeBlobEntry != 0) {
-      log_err("Input image has a stale DeviceTreeBlob "
-              "reference.");
+      log_err(
+          "Input image has a stale DeviceTreeBlob "
+          "reference.");
       return false;
     }
     if (hasDtb) {
@@ -212,8 +209,9 @@ static bool load_packed(const char *path, PackedImage *packed)
           manifest->entries[entry->deviceTreeBlobEntry].type !=
               SHIM_ENTRY_TYPE_DTB ||
           manifest->entries[entry->deviceTreeBlobEntry].flags != 0) {
-        log_err("Input image has an invalid DeviceTreeBlob "
-                "reference.");
+        log_err(
+            "Input image has an invalid DeviceTreeBlob "
+            "reference.");
         return false;
       }
     }
@@ -231,8 +229,7 @@ static bool load_packed(const char *path, PackedImage *packed)
         return false;
       }
     }
-    if (index != attachedShimIndex &&
-        (size_t)entry->offset < attachedShimEnd)
+    if (index != attachedShimIndex && (size_t)entry->offset < attachedShimEnd)
       return false;
   }
   return true;
@@ -244,8 +241,7 @@ static bool restore_files(const PackedImage *packed, const char *directory)
   const Manifest      *manifest          = packed->manifest;
   size_t               entryCount        = manifest->header.entryCount;
   size_t               attachedShimIndex = entryCount - 1;
-  const ManifestEntry *attachedShim      =
-      &manifest->entries[attachedShimIndex];
+  const ManifestEntry *attachedShim = &manifest->entries[attachedShimIndex];
 
   FileContent base = {0};
   base.fileSize    = (size_t)manifest->entries[0].size;
@@ -253,14 +249,13 @@ static bool restore_files(const PackedImage *packed, const char *directory)
   if (base.fileBuffer == NULL)
     return false;
   memcpy(base.fileBuffer, packed->buffer + packed->headerOffset, base.fileSize);
-    image_write_le64(base.fileBuffer, manifest->header.baseImageInstructions);
-    image_write_le64(
-      base.fileBuffer + 0x10, manifest->header.baseImageImageSize);
-    image_write_le64(
+  image_write_le64(base.fileBuffer, manifest->header.baseImageInstructions);
+  image_write_le64(base.fileBuffer + 0x10, manifest->header.baseImageImageSize);
+  image_write_le64(
       base.fileBuffer + 0x20, manifest->header.baseImageManifestOffset);
-    image_write_le64(
+  image_write_le64(
       base.fileBuffer + 0x28, manifest->header.baseImageManifestSize);
-    image_write_le64(
+  image_write_le64(
       base.fileBuffer + 0x30, manifest->header.baseImageShimOffset);
   {
     const ManifestEntry *baseEntry  = &manifest->entries[0];

@@ -139,20 +139,19 @@ int PackImage(const PackConfig *config)
   manifest->header.magic         = MANIFEST_MAGIC;
   manifest->header.version.major = MANIFEST_VERSION_MAJOR;
   manifest->header.version.minor = MANIFEST_VERSION_MINOR;
-  manifest->header.headerSize    = sizeof(ManifestHeader);
-  manifest->header.entrySize     = sizeof(ManifestEntry);
   manifest->header.entryCount    = (uint32_t)manifestEntryCount;
   manifest->header.defaultEntry  = config->defaultEntry;
   manifest->header.timeoutMs     = config->timeoutMs;
-    const uint8_t *originalHeader =
+  const uint8_t *originalHeader =
       primary.fileBuffer + primaryInfo.headerOffset;
-    manifest->header.baseImageInstructions = image_read_le64(originalHeader);
-    manifest->header.baseImageImageSize = image_read_le64(originalHeader + 0x10);
-    manifest->header.baseImageManifestOffset =
+  manifest->header.baseImageInstructions = image_read_le64(originalHeader);
+  manifest->header.baseImageImageSize =
+      image_read_le64(originalHeader + 0x10);
+  manifest->header.baseImageManifestOffset =
       image_read_le64(originalHeader + 0x20);
-    manifest->header.baseImageManifestSize =
+  manifest->header.baseImageManifestSize =
       image_read_le64(originalHeader + 0x28);
-    manifest->header.baseImageShimOffset =
+  manifest->header.baseImageShimOffset =
       image_read_le64(originalHeader + 0x30);
 
   uint8_t *kernelHeader = output.fileBuffer + primaryInfo.headerOffset;
@@ -161,9 +160,8 @@ int PackImage(const PackConfig *config)
 
   ManifestEntry *baseEntry = &manifest->entries[0];
   memcpy(baseEntry->name, baseImage->name, strlen(baseImage->name) + 1);
-  baseEntry->type        = SHIM_ENTRY_TYPE_LINUX;
-  baseEntry->entryOffset = baseImage->entryOffset;
-  baseEntry->offset      = 0;
+  baseEntry->type   = SHIM_ENTRY_TYPE_LINUX;
+  baseEntry->offset = 0;
   baseEntry->size        = primaryInfo.payloadSize;
   baseEntry->flags = SHIM_ENTRY_FLAG_BASE_IMAGE | SHIM_ENTRY_FLAG_EXECUTABLE;
   if (baseImage->hasDeviceTreeBlob) {
@@ -245,7 +243,8 @@ int PackImage(const PackConfig *config)
     }
 
     if (manifest_entry_type_is_executable(image->type) &&
-        (image->entryOffset > payloadSize ||
+        (image->entryOffset > UINT32_MAX ||
+         image->entryOffset > payloadSize ||
          payloadSize - (size_t)image->entryOffset < 4 ||
          (image->entryOffset & (ARM64_BRANCH_ALIGNMENT - 1)) != 0)) {
       log_err(
@@ -267,7 +266,7 @@ int PackImage(const PackConfig *config)
     ManifestEntry *entry = &manifest->entries[manifestIndex++];
     memcpy(entry->name, image->name, strlen(image->name) + 1);
     entry->type             = image->type;
-    entry->entryOffset      = image->entryOffset;
+    entry->entryOffset      = (uint32_t)image->entryOffset;
     entry->alignment        = image->alignment;
     entry->copySizeMax      = image->hasCopySizeMax ? image->copySizeMax : 0;
     entry->sourcePrefixSize = (uint32_t)payloadOffset;
@@ -308,7 +307,6 @@ int PackImage(const PackConfig *config)
       log_err("Failed to append manifest.");
       goto cleanup;
     }
-    manifest->header.imageSize = manifestOffset + manifestSize;
     memcpy(output.fileBuffer + manifestFileOffset, manifest, manifestSize);
   }
 

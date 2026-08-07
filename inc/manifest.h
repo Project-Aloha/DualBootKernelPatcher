@@ -41,9 +41,6 @@ _Static_assert(
 typedef struct {
   uint32_t        magic;
   ManifestVersion version;
-  uint64_t        imageSize;
-  uint32_t        headerSize;
-  uint32_t        entrySize;
   uint32_t        entryCount;
   uint32_t        defaultEntry;
   uint32_t        timeoutMs;
@@ -54,7 +51,7 @@ typedef struct {
   uint64_t        baseImageShimOffset;
 } ManifestHeader;
 
-_Static_assert(sizeof(ManifestHeader) == 76, "Invalid manifest header size");
+_Static_assert(sizeof(ManifestHeader) == 60, "Invalid manifest header size");
 
 typedef struct {
   char     name[32];
@@ -63,15 +60,15 @@ typedef struct {
   uint32_t type;
   uint32_t flags;
   uint64_t loadAddress;
-  uint64_t entryOffset;
-  uint64_t deviceTreeBlobEntry;
-  uint64_t alignment;
+  uint32_t entryOffset;
+  uint32_t deviceTreeBlobEntry;
+  uint32_t alignment;
   uint64_t copySizeMax;
   uint32_t sourcePrefixSize;
   uint8_t  sourcePrefix[MANIFEST_SOURCE_PREFIX_MAX_SIZE];
 } ManifestEntry;
 
-_Static_assert(sizeof(ManifestEntry) == 120, "Invalid manifest entry size");
+_Static_assert(sizeof(ManifestEntry) == 108, "Invalid manifest entry size");
 
 typedef struct {
   ManifestHeader header;
