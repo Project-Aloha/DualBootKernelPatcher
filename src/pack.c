@@ -144,14 +144,14 @@ int PackImage(const PackConfig *config)
   manifest->header.timeoutMs     = config->timeoutMs;
   const uint8_t *originalHeader =
       primary.fileBuffer + primaryInfo.headerOffset;
-  manifest->header.baseImageInstructions = image_read_le64(originalHeader);
-  manifest->header.baseImageImageSize =
+    manifest->header.baseImage.instructions = image_read_le64(originalHeader);
+    manifest->header.baseImage.imageSize =
       image_read_le64(originalHeader + 0x10);
-  manifest->header.baseImageManifestOffset =
+    manifest->header.baseImage.manifestOffset =
       image_read_le64(originalHeader + 0x20);
-  manifest->header.baseImageManifestSize =
+    manifest->header.baseImage.manifestSize =
       image_read_le64(originalHeader + 0x28);
-  manifest->header.baseImageShimOffset =
+    manifest->header.baseImage.shimOffset =
       image_read_le64(originalHeader + 0x30);
 
   uint8_t *kernelHeader = output.fileBuffer + primaryInfo.headerOffset;

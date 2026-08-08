@@ -261,14 +261,14 @@ static bool restore_files(const PackedImage *packed, const char *directory)
   if (base.fileBuffer == NULL)
     return false;
   memcpy(base.fileBuffer, packed->buffer + packed->headerOffset, base.fileSize);
-  image_write_le64(base.fileBuffer, manifest->header.baseImageInstructions);
-  image_write_le64(base.fileBuffer + 0x10, manifest->header.baseImageImageSize);
+  image_write_le64(base.fileBuffer, manifest->header.baseImage.instructions);
+  image_write_le64(base.fileBuffer + 0x10, manifest->header.baseImage.imageSize);
   image_write_le64(
-      base.fileBuffer + 0x20, manifest->header.baseImageManifestOffset);
+      base.fileBuffer + 0x20, manifest->header.baseImage.manifestOffset);
   image_write_le64(
-      base.fileBuffer + 0x28, manifest->header.baseImageManifestSize);
+      base.fileBuffer + 0x28, manifest->header.baseImage.manifestSize);
   image_write_le64(
-      base.fileBuffer + 0x30, manifest->header.baseImageShimOffset);
+      base.fileBuffer + 0x30, manifest->header.baseImage.shimOffset);
   {
     const ManifestEntry *baseEntry = &manifest->entries[0];
     uint8_t              prefix[QC_ABOOT_KERNEL_HDR_SIZE];

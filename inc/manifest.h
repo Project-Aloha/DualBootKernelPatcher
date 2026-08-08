@@ -39,16 +39,24 @@ _Static_assert(
 #pragma pack(1)
 
 typedef struct {
-  uint32_t        magic;
-  ManifestVersion version;
-  uint32_t        entryCount;
-  uint32_t        defaultEntry;
-  uint32_t        timeoutMs;
-  uint64_t        baseImageInstructions;
-  uint64_t        baseImageImageSize;
-  uint64_t        baseImageManifestOffset;
-  uint64_t        baseImageManifestSize;
-  uint64_t        baseImageShimOffset;
+  uint64_t instructions;
+  uint64_t imageSize;
+  uint64_t manifestOffset;
+  uint64_t manifestSize;
+  uint64_t shimOffset;
+} ManifestBaseImage;
+
+_Static_assert(
+    sizeof(ManifestBaseImage) == 5 * sizeof(uint64_t),
+    "Invalid manifest base image size");
+
+typedef struct {
+  uint32_t          magic;
+  ManifestVersion   version;
+  uint32_t          entryCount;
+  uint32_t          defaultEntry;
+  uint32_t          timeoutMs;
+  ManifestBaseImage baseImage;
 } ManifestHeader;
 
 _Static_assert(sizeof(ManifestHeader) == 60, "Invalid manifest header size");
