@@ -1,4 +1,5 @@
 #include "image_format.h"
+#include "manifest.h"
 
 uint32_t image_read_le32(const uint8_t *buffer)
 {

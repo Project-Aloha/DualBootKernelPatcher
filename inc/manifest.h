@@ -9,7 +9,6 @@
 #define MANIFEST_VERSION_MAJOR 0U
 #define MANIFEST_VERSION_MINOR 1U
 #define MANIFEST_MAX_ENTRIES 50U
-#define MANIFEST_SOURCE_PREFIX_MAX_SIZE 0x14U
 
 typedef enum {
   SHIM_ENTRY_TYPE_LINUX = 1,
@@ -25,6 +24,7 @@ typedef enum {
   SHIM_ENTRY_FLAG_COPY                 = BIT(1),
   SHIM_ENTRY_FLAG_EXECUTABLE           = BIT(2),
   SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB = BIT(3),
+  SHIM_ENTRY_FLAG_HAS_QC_ABOOT_HEADER  = BIT(4),
 } ManifestEntryFlag;
 
 typedef struct {
@@ -64,11 +64,9 @@ typedef struct {
   uint32_t deviceTreeBlobEntry;
   uint32_t alignment;
   uint64_t copySizeMax;
-  uint32_t sourcePrefixSize;
-  uint8_t  sourcePrefix[MANIFEST_SOURCE_PREFIX_MAX_SIZE];
 } ManifestEntry;
 
-_Static_assert(sizeof(ManifestEntry) == 108, "Invalid manifest entry size");
+_Static_assert(sizeof(ManifestEntry) == 84, "Invalid manifest entry size");
 
 typedef struct {
   ManifestHeader header;

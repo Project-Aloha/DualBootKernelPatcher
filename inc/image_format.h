@@ -1,6 +1,5 @@
 #pragma once
 
-#include "manifest.h"
 #include "utils.h"
 
 #include <stdbool.h>
@@ -9,10 +8,6 @@
 #define ARM64_BRANCH_ALIGNMENT 4U
 #define ARM64_BRANCH_MAX_OFFSET SIZE_MB(128)
 #define QC_ABOOT_KERNEL_HDR_SIZE 0x14U
-
-_Static_assert(
-    MANIFEST_SOURCE_PREFIX_MAX_SIZE >= QC_ABOOT_KERNEL_HDR_SIZE,
-    "Manifest cannot preserve the QC aboot kernel header");
 
 typedef struct {
   size_t   headerOffset;

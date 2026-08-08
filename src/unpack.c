@@ -53,6 +53,15 @@ static bool ranges_overlap(
          secondOffset < firstOffset + firstSize;
 }
 
+static bool write_qc_aboot_header(uint8_t *output, uint64_t size)
+{
+  if (size > UINT32_MAX)
+    return false;
+  memcpy(output, "UNCOMPRESSED_IMG", 16);
+  image_write_le32(output + 0x10, (uint32_t)size);
+  return true;
+}
+
 static bool valid_name(const char name[32])
 {
   const char *end = memchr(name, '\0', 32);
@@ -181,13 +190,16 @@ static bool load_packed(const char *path, PackedImage *packed)
         index == 0 ? SHIM_ENTRY_FLAG_BASE_IMAGE | SHIM_ENTRY_FLAG_EXECUTABLE |
                          SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB
                    : SHIM_ENTRY_FLAG_COPY | SHIM_ENTRY_FLAG_EXECUTABLE |
-                         SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB;
-    bool copyImage  = (entry->flags & SHIM_ENTRY_FLAG_COPY) != 0;
+                         SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB |
+                         SHIM_ENTRY_FLAG_HAS_QC_ABOOT_HEADER;
+    bool copyImage = (entry->flags & SHIM_ENTRY_FLAG_COPY) != 0;
     bool executable = (entry->flags & SHIM_ENTRY_FLAG_EXECUTABLE) != 0;
     bool hasDtb = (entry->flags & SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB) != 0;
+    bool hasQcAboot =
+        (entry->flags & SHIM_ENTRY_FLAG_HAS_QC_ABOOT_HEADER) != 0;
     if ((entry->flags & ~allowedFlags) != 0 || entry->alignment < 2 ||
         entry->alignment > 31 ||
-        entry->sourcePrefixSize > MANIFEST_SOURCE_PREFIX_MAX_SIZE ||
+        (hasQcAboot && entry->type != SHIM_ENTRY_TYPE_LINUX) ||
         (copyImage && (entry->loadAddress == 0 || entry->copySizeMax == 0 ||
                        entry->size > entry->copySizeMax)) ||
         (!copyImage && entry->copySizeMax != 0)) {
@@ -258,13 +270,19 @@ static bool restore_files(const PackedImage *packed, const char *directory)
   image_write_le64(
       base.fileBuffer + 0x30, manifest->header.baseImageShimOffset);
   {
-    const ManifestEntry *baseEntry  = &manifest->entries[0];
-    size_t               prefixSize = baseEntry->sourcePrefixSize;
-    if (prefixSize > MANIFEST_SOURCE_PREFIX_MAX_SIZE ||
+    const ManifestEntry *baseEntry = &manifest->entries[0];
+    uint8_t              prefix[QC_ABOOT_KERNEL_HDR_SIZE];
+    size_t               prefixSize = packed->headerOffset;
+    if (prefixSize > sizeof(prefix) ||
+        (prefixSize != 0 && baseEntry->size > UINT32_MAX) ||
         !join_path(path, sizeof(path), directory, "BaseImage") ||
         prefixSize + base.fileSize > SIZE_MAX) {
       free(base.fileBuffer);
       return false;
+    }
+    if (prefixSize != 0) {
+      memcpy(prefix, packed->buffer, prefixSize);
+      image_write_le32(prefix + 0x10, (uint32_t)baseEntry->size);
     }
     size_t   restoredSize = prefixSize + base.fileSize;
     uint8_t *restored     = malloc(restoredSize);
@@ -272,7 +290,7 @@ static bool restore_files(const PackedImage *packed, const char *directory)
       free(base.fileBuffer);
       return false;
     }
-    memcpy(restored, baseEntry->sourcePrefix, prefixSize);
+    memcpy(restored, prefix, prefixSize);
     memcpy(restored + prefixSize, base.fileBuffer, base.fileSize);
     bool result = write_buffer(path, restored, restoredSize);
     free(restored);
@@ -294,15 +312,18 @@ static bool restore_files(const PackedImage *packed, const char *directory)
     snprintf(name, sizeof(name), "Image-%02zu-%s", index, typeName);
     if (!join_path(path, sizeof(path), directory, name))
       return false;
-    size_t prefixSize = entry->sourcePrefixSize;
-    if (prefixSize > MANIFEST_SOURCE_PREFIX_MAX_SIZE ||
-        prefixSize + (size_t)entry->size < prefixSize)
-      return false;
+    uint8_t prefix[QC_ABOOT_KERNEL_HDR_SIZE];
+    size_t  prefixSize = 0;
+    if (entry->flags & SHIM_ENTRY_FLAG_HAS_QC_ABOOT_HEADER) {
+      if (!write_qc_aboot_header(prefix, entry->size))
+        return false;
+      prefixSize = QC_ABOOT_KERNEL_HDR_SIZE;
+    }
     size_t   outputSize = prefixSize + (size_t)entry->size;
     uint8_t *output     = malloc(outputSize);
     if (output == NULL)
       return false;
-    memcpy(output, entry->sourcePrefix, prefixSize);
+    memcpy(output, prefix, prefixSize);
     memcpy(
         output + prefixSize,
         packed->buffer + packed->headerOffset + entry->offset,

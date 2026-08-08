@@ -168,11 +168,7 @@ int PackImage(const PackConfig *config)
     baseEntry->flags |= SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB;
     baseEntry->deviceTreeBlobEntry = baseImage->deviceTreeBlobEntry;
   }
-  baseEntry->alignment        = baseImage->alignment;
-  baseEntry->sourcePrefixSize = (uint32_t)primaryInfo.headerOffset;
-  if (primaryInfo.headerOffset != 0)
-    memcpy(
-        baseEntry->sourcePrefix, primary.fileBuffer, primaryInfo.headerOffset);
+  baseEntry->alignment = baseImage->alignment;
 
   size_t manifestIndex = 1;
   for (size_t index = 0; index < config->imageCount; index++) {
@@ -269,11 +265,10 @@ int PackImage(const PackConfig *config)
     entry->entryOffset      = (uint32_t)image->entryOffset;
     entry->alignment        = image->alignment;
     entry->copySizeMax      = image->hasCopySizeMax ? image->copySizeMax : 0;
-    entry->sourcePrefixSize = (uint32_t)payloadOffset;
-    if (payloadOffset != 0)
-      memcpy(entry->sourcePrefix, extra.fileBuffer, payloadOffset);
     entry->offset = imageOffset;
     entry->size   = payloadSize;
+    if (image->type == SHIM_ENTRY_TYPE_LINUX && payloadOffset != 0)
+      entry->flags |= SHIM_ENTRY_FLAG_HAS_QC_ABOOT_HEADER;
     if (manifest_entry_type_is_executable(image->type))
       entry->flags |= SHIM_ENTRY_FLAG_EXECUTABLE;
     if (image->hasCopyAddress) {
