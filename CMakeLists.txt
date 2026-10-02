@@ -48,6 +48,11 @@ endif ()
 target_include_directories(inih_static PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/inih
 )
+target_compile_definitions(inih_static PRIVATE
+    INI_USE_STACK=0
+    INI_ALLOW_REALLOC=1
+    INI_MAX_LINE=8192
+)
 set(INIH_TARGET inih_static)
 
 # Compile the patcher.

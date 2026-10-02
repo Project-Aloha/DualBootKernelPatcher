@@ -2,7 +2,6 @@
 
 #include <stdio.h>
 
-// ANSI colors, matching the CrDK logging style.
 #define LOG_COLOR_RESET "\x1b[0m"
 #define LOG_COLOR_INFO "\x1b[97m"       /* bright white */
 #define LOG_COLOR_WARN "\x1b[38;5;208m" /* orange (256-color) */

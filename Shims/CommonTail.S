@@ -16,11 +16,12 @@ _UEFI:
     ldr     x25, [x24, #0x20]
     cbz     x25, _Linux
     // Linux header +0x28: full Manifest blob size. Two entries require
-    // one 60-byte header and two 84-byte entries.
+    // one 60-byte header and two minimum 60-byte records.
     ldr     x8, [x24, #0x28]
-    cmp     x8, #228
+    cmp     x8, #180
     b.lo    _Linux
     add     x25, x24, x25
+    add     x14, x25, x8
 
     // ManifestHeader: magic +0x00, version +0x04 and entryCount +0x08.
     ldr     w8, [x25]
@@ -36,28 +37,34 @@ _UEFI:
     cmp     w8, #2
     b.lo    _Linux
 
-    // Entry #1 follows the header and BaseImage entry (#0).
-    // This fixed UEFI path expects entry #1 to be an executable payload.
+    // Entry #1 follows the variable-length BaseImage entry (#0).
     add     x25, x25, #60
-    add     x25, x25, #84
-    // ManifestEntry: offset +0x20, size +0x28, type +0x30,
-    // flags +0x34, loadAddress +0x38 and entryOffset +0x40.
-    ldr     w8, [x25, #48]
+    ldr     w8, [x25, #52]
+    add     x25, x25, #56
+    add     x25, x25, x8
+    add     x25, x25, #3
+    and     x25, x25, #~3
+    add     x8, x25, #56
+    cmp     x8, x14
+    b.hi    _Linux
+    // ManifestEntry: offset +0x00, size +0x08, type +0x10,
+    // flags +0x14, loadAddress +0x18 and entryOffset +0x20.
+    ldr     w8, [x25, #16]
     cbz     w8, _Linux
     cmp     w8, #3
     b.hi    _Linux
-    ldr     x10, [x25, #40]
+    ldr     x10, [x25, #8]
     cmp     x10, #4
     b.lo    _Linux
-    ldr     x11, [x25, #64]
+    ldr     w11, [x25, #32]
     sub     x12, x10, #4
     cmp     x11, x12
     b.hi    _Linux
 
     // Source address is BaseImage plus the payload's runtime-relative offset.
-    ldr     x8, [x25, #32]
+    ldr     x8, [x25]
     add     x8, x24, x8
-    ldr     w9, [x25, #52]
+    ldr     w9, [x25, #20]
     // Entry #1 must be executable. Allow only COPY (bit 1) and EXECUTABLE
     // (bit 2); reject BASE_IMAGE (bit 0), the DTB reference (bit 3) and
     // unknown bits.
@@ -65,9 +72,9 @@ _UEFI:
     b.eq    _Linux
     bic     w10, w9, #0x6
     cbnz    w10, _Linux
-    // SHIM_ENTRY_FLAG_COPY is bit 1. Copy before executing when it is set.
+    // MF_ENTRY_FLAG_COPY is bit 1. Copy before executing when it is set.
     tbz     w9, #1, _ExecuteEntry
-    ldr     x9, [x25, #56]
+    ldr     x9, [x25, #24]
     cbz     x9, _Linux
     mov     x24, x9
     mov     x12, x10

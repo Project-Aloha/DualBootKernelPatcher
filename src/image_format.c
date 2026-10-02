@@ -63,22 +63,22 @@ bool image_inspect_arm64_linux(const FileContent *file, Arm64ImageInfo *info)
 
 bool manifest_entry_type_is_executable(uint32_t type)
 {
-  return type == SHIM_ENTRY_TYPE_LINUX || type == SHIM_ENTRY_TYPE_FREE_EXEC ||
-         type == SHIM_ENTRY_TYPE_SHIM;
+  return type == MF_ENTRY_TYPE_LINUX || type == MF_ENTRY_TYPE_FREE_EXEC ||
+         type == MF_ENTRY_TYPE_SHIM;
 }
 
 const char *manifest_entry_type_name(uint32_t type)
 {
   switch (type) {
-  case SHIM_ENTRY_TYPE_LINUX:
+  case MF_ENTRY_TYPE_LINUX:
     return "Linux";
-  case SHIM_ENTRY_TYPE_FREE_EXEC:
+  case MF_ENTRY_TYPE_FREE_EXEC:
     return "FreeExec";
-  case SHIM_ENTRY_TYPE_SHIM:
+  case MF_ENTRY_TYPE_SHIM:
     return "Shim";
-  case SHIM_ENTRY_TYPE_BLOB:
+  case MF_ENTRY_TYPE_BLOB:
     return "Blob";
-  case SHIM_ENTRY_TYPE_DTB:
+  case MF_ENTRY_TYPE_DTB:
     return "DTB";
   default:
     return NULL;

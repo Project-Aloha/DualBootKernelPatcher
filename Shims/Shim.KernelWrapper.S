@@ -12,13 +12,14 @@ _ShimStart:
     sub     x24, x23, #4
 
     // Linux header +0x20/+0x28 contain the runtime-relative Manifest offset
-    // and the full Manifest blob size. Two entries require 228 bytes.
+    // and the full Manifest blob size. Two entries require at least 180 bytes.
     ldr     x25, [x24, #0x20]
     cbz     x25, _Linux
     ldr     x8, [x24, #0x28]
-    cmp     x8, #228
+    cmp     x8, #180
     b.lo    _Linux
     add     x25, x24, x25
+    add     x14, x25, x8
     // ManifestHeader: magic +0x00, version +0x04 and entryCount +0x08.
     ldr     w8, [x25]
     movz    w9, #0x504b
@@ -33,27 +34,33 @@ _ShimStart:
     cmp     w8, #2
     b.lo    _Linux
 
-    // Entry #1 starts after the header and BaseImage entry (#0).
-    // KernelWrapper reserves it for a DTB payload copied to a fixed address.
+    // Entry #1 starts after the variable-length BaseImage entry (#0).
     add     x25, x25, #60
-    add     x25, x25, #84
-    // ManifestEntry: offset +0x20, size +0x28, type +0x30,
-    // flags +0x34 and loadAddress +0x38.
-    ldr     w8, [x25, #48]
-    // SHIM_ENTRY_TYPE_DTB is 5; the reserved DTB entry must carry exactly
-    // SHIM_ENTRY_FLAG_COPY (bit 1) and no other flags.
+    ldr     w8, [x25, #52]
+    add     x25, x25, #56
+    add     x25, x25, x8
+    add     x25, x25, #3
+    and     x25, x25, #~3
+    add     x8, x25, #56
+    cmp     x8, x14
+    b.hi    _Linux
+    // ManifestEntry: offset +0x00, size +0x08, type +0x10,
+    // flags +0x14 and loadAddress +0x18.
+    ldr     w8, [x25, #16]
+    // MF_ENTRY_TYPE_DTB is 5; the reserved DTB entry must carry exactly
+    // MF_ENTRY_FLAG_COPY (bit 1) and no other flags.
     cmp     w8, #5
     b.ne    _Linux
-    ldr     w8, [x25, #52]
+    ldr     w8, [x25, #20]
     cmp     w8, #2
     b.ne    _Linux
 
     // Copy the packed DTB from BaseImage + entry.offset to entry.loadAddress.
-    ldr     x8, [x25, #32]
+    ldr     x8, [x25]
     add     x8, x24, x8
-    ldr     x9, [x25, #56]
+    ldr     x9, [x25, #24]
     cbz     x9, _Linux
-    ldr     x10, [x25, #40]
+    ldr     x10, [x25, #8]
     cbz     x10, _Linux
     mov     x11, x9
     mov     x12, x10

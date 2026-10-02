@@ -39,10 +39,34 @@ static bool resize_output(FileContent *output, size_t newSize)
   return true;
 }
 
+static bool manifest_entry_size(const char *name, size_t *size)
+{
+  size_t nameLen = strlen(name);
+  if (nameLen == 0 || nameLen > UINT32_MAX ||
+      nameLen > SIZE_MAX - sizeof(ManifestEntry))
+    return false;
+  return image_align_up(
+      sizeof(ManifestEntry) + nameLen, MANIFEST_ENTRY_ALIGNMENT, size);
+}
+
+static ManifestEntry *write_manifest_entry(uint8_t **cursor, const char *name)
+{
+  size_t nameLen    = strlen(name);
+  size_t recordSize = 0;
+  if (!manifest_entry_size(name, &recordSize))
+    return NULL;
+
+  ManifestEntry *entry = (ManifestEntry *)*cursor;
+  entry->nameLen       = (uint32_t)nameLen;
+  memcpy(entry->name, name, nameLen);
+  *cursor += recordSize;
+  return entry;
+}
+
 static bool
 inspect_typed_blob(const FileContent *file, const PackImageConfig *image)
 {
-  if (image->type == SHIM_ENTRY_TYPE_DTB) {
+  if (image->type == MF_ENTRY_TYPE_DTB) {
     static const uint8_t fdtMagic[] = {0xd0, 0x0d, 0xfe, 0xed};
     if (file->fileSize < sizeof(fdtMagic) ||
         memcmp(file->fileBuffer, fdtMagic, sizeof(fdtMagic)) != 0) {
@@ -131,8 +155,19 @@ int PackImage(const PackConfig *config)
       shim.fileBuffer, shim.fileSize);
 
   size_t manifestEntryCount = config->imageCount + 1;
-  size_t manifestSize = sizeof(ManifestHeader) +
-                        manifestEntryCount * sizeof(ManifestEntry);
+  size_t manifestSize       = sizeof(ManifestHeader);
+  for (size_t index = 0; index < config->imageCount; index++) {
+    size_t entrySize = 0;
+    if (!manifest_entry_size(config->images[index].name, &entrySize) ||
+        manifestSize > SIZE_MAX - entrySize)
+      goto cleanup;
+    manifestSize += entrySize;
+  }
+  size_t shimEntrySize = 0;
+  if (!manifest_entry_size("Attached Shim", &shimEntrySize) ||
+      manifestSize > SIZE_MAX - shimEntrySize)
+    goto cleanup;
+  manifestSize += shimEntrySize;
   manifest = calloc(1, manifestSize);
   if (manifest == NULL)
     goto cleanup;
@@ -144,33 +179,35 @@ int PackImage(const PackConfig *config)
   manifest->header.timeoutMs     = config->timeoutMs;
   const uint8_t *originalHeader =
       primary.fileBuffer + primaryInfo.headerOffset;
-    manifest->header.baseImage.instructions = image_read_le64(originalHeader);
-    manifest->header.baseImage.imageSize =
+  manifest->header.baseImage.instructions = image_read_le64(originalHeader);
+  manifest->header.baseImage.imageSize =
       image_read_le64(originalHeader + 0x10);
-    manifest->header.baseImage.manifestOffset =
+  manifest->header.baseImage.manifestOffset =
       image_read_le64(originalHeader + 0x20);
-    manifest->header.baseImage.manifestSize =
+  manifest->header.baseImage.manifestSize =
       image_read_le64(originalHeader + 0x28);
-    manifest->header.baseImage.shimOffset =
+  manifest->header.baseImage.shimOffset =
       image_read_le64(originalHeader + 0x30);
 
   uint8_t *kernelHeader = output.fileBuffer + primaryInfo.headerOffset;
   if (!patch_kernel_entry(kernelHeader, primarySlot))
     goto cleanup;
 
-  ManifestEntry *baseEntry = &manifest->entries[0];
-  memcpy(baseEntry->name, baseImage->name, strlen(baseImage->name) + 1);
-  baseEntry->type   = SHIM_ENTRY_TYPE_LINUX;
+  uint8_t       *manifestCursor = manifest->entries;
+  ManifestEntry *baseEntry =
+      write_manifest_entry(&manifestCursor, baseImage->name);
+  if (baseEntry == NULL)
+    goto cleanup;
+  baseEntry->type   = MF_ENTRY_TYPE_LINUX;
   baseEntry->offset = 0;
-  baseEntry->size        = primaryInfo.payloadSize;
-  baseEntry->flags = SHIM_ENTRY_FLAG_BASE_IMAGE | SHIM_ENTRY_FLAG_EXECUTABLE;
-  if (baseImage->hasDeviceTreeBlob) {
-    baseEntry->flags |= SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB;
+  baseEntry->size   = primaryInfo.payloadSize;
+  baseEntry->flags = MF_ENTRY_FLAG_BASE_IMAGE | MF_ENTRY_FLAG_EXECUTABLE;
+  if (baseImage->fieldsPresent & PACK_IMAGE_FIELD_DEVICE_TREE_BLOB) {
+    baseEntry->flags |= MF_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB;
     baseEntry->deviceTreeBlobEntry = baseImage->deviceTreeBlobEntry;
   }
   baseEntry->alignment = baseImage->alignment;
 
-  size_t manifestIndex = 1;
   for (size_t index = 0; index < config->imageCount; index++) {
     if (index == config->baseImageIndex)
       continue;
@@ -183,7 +220,8 @@ int PackImage(const PackConfig *config)
       free(extra.fileBuffer);
       goto cleanup;
     }
-    if (image->hasCopyAddress && extra.fileSize > image->copySizeMax) {
+    if ((image->fieldsPresent & PACK_IMAGE_FIELD_COPY_ADDRESS) &&
+        extra.fileSize > image->copySizeMax) {
       log_err(
           "[%s] image size 0x%zx exceeds CopySizeMax "
           "0x%llx.",
@@ -192,7 +230,7 @@ int PackImage(const PackConfig *config)
       free(extra.fileBuffer);
       goto cleanup;
     }
-    if (image->hasCopyAddress &&
+    if ((image->fieldsPresent & PACK_IMAGE_FIELD_COPY_ADDRESS) &&
         image->copyAddress > UINT64_MAX - extra.fileSize) {
       log_err("Copy address range overflows: %s", image->section);
       free(extra.fileBuffer);
@@ -207,7 +245,7 @@ int PackImage(const PackConfig *config)
     size_t         imageSlot     = extra.fileSize;
     Arm64ImageInfo extraInfo     = {0};
 
-    if (image->type == SHIM_ENTRY_TYPE_LINUX) {
+    if (image->type == MF_ENTRY_TYPE_LINUX) {
       if (!image_inspect_arm64_linux(&extra, &extraInfo)) {
         log_err("[%s] is not an ARM64 Linux Image.", image->section);
         free(extra.fileBuffer);
@@ -259,35 +297,43 @@ int PackImage(const PackConfig *config)
         output.fileBuffer + primaryInfo.headerOffset + imageOffset,
         extra.fileBuffer + payloadOffset, payloadSize);
 
-    ManifestEntry *entry = &manifest->entries[manifestIndex++];
-    memcpy(entry->name, image->name, strlen(image->name) + 1);
+    ManifestEntry *entry = write_manifest_entry(&manifestCursor, image->name);
+    if (entry == NULL) {
+      free(extra.fileBuffer);
+      goto cleanup;
+    }
     entry->type             = image->type;
     entry->entryOffset      = (uint32_t)image->entryOffset;
     entry->alignment        = image->alignment;
-    entry->copySizeMax      = image->hasCopySizeMax ? image->copySizeMax : 0;
+    entry->copySizeMax =
+      (image->fieldsPresent & PACK_IMAGE_FIELD_COPY_SIZE_MAX)
+        ? image->copySizeMax
+        : 0;
     entry->offset = imageOffset;
     entry->size   = payloadSize;
-    if (image->type == SHIM_ENTRY_TYPE_LINUX && payloadOffset != 0)
-      entry->flags |= SHIM_ENTRY_FLAG_HAS_QC_ABOOT_HEADER;
+    if (image->type == MF_ENTRY_TYPE_LINUX && payloadOffset != 0)
+      entry->flags |= MF_ENTRY_FLAG_HAS_QC_ABOOT_HEADER;
     if (manifest_entry_type_is_executable(image->type))
-      entry->flags |= SHIM_ENTRY_FLAG_EXECUTABLE;
-    if (image->hasCopyAddress) {
-      entry->flags |= SHIM_ENTRY_FLAG_COPY;
+      entry->flags |= MF_ENTRY_FLAG_EXECUTABLE;
+    if (image->fieldsPresent & PACK_IMAGE_FIELD_COPY_ADDRESS) {
+      entry->flags |= MF_ENTRY_FLAG_COPY;
       entry->loadAddress = image->copyAddress;
     }
-    if (image->hasDeviceTreeBlob) {
-      entry->flags |= SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB;
+    if (image->fieldsPresent & PACK_IMAGE_FIELD_DEVICE_TREE_BLOB) {
+      entry->flags |= MF_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB;
       entry->deviceTreeBlobEntry = image->deviceTreeBlobEntry;
     }
     free(extra.fileBuffer);
   }
 
-  ManifestEntry *shimEntry = &manifest->entries[manifestIndex];
-  memcpy(shimEntry->name, "Attached Shim", sizeof("Attached Shim"));
+  ManifestEntry *shimEntry =
+      write_manifest_entry(&manifestCursor, "Attached Shim");
+  if (shimEntry == NULL || manifestCursor != (uint8_t *)manifest + manifestSize)
+    goto cleanup;
   shimEntry->offset      = primarySlot;
   shimEntry->size        = shim.fileSize;
-  shimEntry->type        = SHIM_ENTRY_TYPE_SHIM;
-  shimEntry->flags       = SHIM_ENTRY_FLAG_EXECUTABLE;
+  shimEntry->type        = MF_ENTRY_TYPE_SHIM;
+  shimEntry->flags       = MF_ENTRY_FLAG_EXECUTABLE;
   shimEntry->alignment   = 2;
 
   size_t manifestOffset = 0;

@@ -2,41 +2,49 @@
 
 #include "manifest.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #define PACK_PATH_SIZE 4096U
+#define CFG_NAME_LEN_MAX 64U
 
+typedef enum {
+  PACK_IMAGE_FIELD_TYPE             = BIT(0),
+  PACK_IMAGE_FIELD_BASE_IMAGE       = BIT(1), // BaseImage=true
+  PACK_IMAGE_FIELD_COPY_ADDRESS     = BIT(2),
+  PACK_IMAGE_FIELD_COPY_SIZE_MAX    = BIT(3),
+  PACK_IMAGE_FIELD_ALIGNMENT        = BIT(4),
+  PACK_IMAGE_FIELD_ENTRY_OFFSET     = BIT(5),
+  PACK_IMAGE_FIELD_DEVICE_TREE_BLOB = BIT(6),
+  PACK_IMAGE_FIELD_BASE_IMAGE_SET   = BIT(7), // BaseImage key was present
+} PackImageField;
+
+// Metadata of an entry in the pack config.
 typedef struct {
-  char     section[32];
-  char     name[32];
+  char     section[CFG_NAME_LEN_MAX];
+  char    *name;
   char     path[PACK_PATH_SIZE];
-  uint32_t type;
-  int      hasType;
-  int      baseImage;
+  char     dtbXref[CFG_NAME_LEN_MAX];
   uint64_t copyAddress;
-  int      hasCopyAddress;
   uint64_t copySizeMax;
-  int      hasCopySizeMax;
-  uint32_t alignment;
-  int      hasAlignment;
   uint64_t entryOffset;
-  int      hasEntryOffset;
-  char     deviceTreeBlobSection[32];
-  int      hasDeviceTreeBlob;
+  uint32_t type;
+  uint32_t alignment;
   uint32_t deviceTreeBlobEntry;
+  uint32_t fieldsPresent;
 } PackImageConfig;
 
 typedef struct {
-  int      present;
   uint32_t type;
-  int      hasType;
+  bool     present;
+  bool     hasType;
 } PackManifestConfig;
 
 typedef struct {
   char               shim[PACK_PATH_SIZE];
   char               output[PACK_PATH_SIZE];
-  char               defaultSection[32];
+  char               defaultSection[CFG_NAME_LEN_MAX];
   PackImageConfig    images[MANIFEST_MAX_ENTRIES - 1];
   size_t             imageCount;
   size_t             baseImageIndex;

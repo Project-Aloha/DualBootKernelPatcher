@@ -3,6 +3,7 @@
 #include "manifest.h"
 
 #include <stdbool.h>
+#include <string.h>
 #include <sys/stat.h>
 
 #ifdef _WIN32
@@ -13,10 +14,11 @@
 #define UNPACK_PATH_SIZE 4096U
 
 typedef struct {
-  uint8_t        *buffer;
-  size_t          size;
-  size_t          headerOffset;
-  const Manifest *manifest;
+  uint8_t             *buffer;
+  size_t               size;
+  size_t               headerOffset;
+  const Manifest      *manifest;
+  const ManifestEntry *entries[MANIFEST_MAX_ENTRIES];
 } PackedImage;
 
 static bool
@@ -62,19 +64,23 @@ static bool write_qc_aboot_header(uint8_t *output, uint64_t size)
   return true;
 }
 
-static bool valid_name(const char name[32])
+static bool valid_name(const char *name, uint32_t nameLen)
 {
-  const char *end = memchr(name, '\0', 32);
-  if (end == NULL || end == name)
+  if (nameLen == 0)
     return false;
-  for (const char *current = name; current < end; current++) {
-    unsigned char character = (unsigned char)*current;
+  for (uint32_t index = 0; index < nameLen; index++) {
+    unsigned char character = (unsigned char)name[index];
     /* Reject control characters and ';', which inih treats as an
      * inline comment and would truncate the generated config. */
     if (character < 0x20 || character == 0x7f || character == ';')
       return false;
   }
   return true;
+}
+
+static bool write_name(FILE *file, const ManifestEntry *entry)
+{
+  return fwrite(entry->name, 1, entry->nameLen, file) == entry->nameLen;
 }
 
 static bool load_packed(const char *path, PackedImage *packed)
@@ -134,9 +140,28 @@ static bool load_packed(const char *path, PackedImage *packed)
   }
 
   size_t entryCount = manifest->header.entryCount;
-  size_t expectedManifestSize =
-      sizeof(ManifestHeader) + entryCount * sizeof(ManifestEntry);
-  if (manifestSize != expectedManifestSize) {
+  size_t cursor     = sizeof(ManifestHeader);
+  for (size_t index = 0; index < entryCount; index++) {
+    if (!range_inside(cursor, sizeof(ManifestEntry), (size_t)manifestSize)) {
+      log_err("Input image has a truncated Manifest entry.");
+      return false;
+    }
+    const ManifestEntry *entry =
+        (const ManifestEntry *)(manifestBuffer + cursor);
+    size_t recordSize = 0;
+    if (entry->nameLen > UINT32_MAX - sizeof(ManifestEntry) ||
+        !image_align_up(
+            sizeof(ManifestEntry) + (size_t)entry->nameLen,
+            MANIFEST_ENTRY_ALIGNMENT, &recordSize) ||
+        !range_inside(cursor, recordSize, (size_t)manifestSize) ||
+        !valid_name(entry->name, entry->nameLen)) {
+      log_err("Input image has an invalid Manifest entry name.");
+      return false;
+    }
+    packed->entries[index] = entry;
+    cursor += recordSize;
+  }
+  if (cursor != manifestSize) {
     log_err("Input image has an invalid Manifest size.");
     return false;
   }
@@ -148,20 +173,19 @@ static bool load_packed(const char *path, PackedImage *packed)
   }
   size_t               primarySlot       = (size_t)primarySlotValue;
   size_t               attachedShimIndex = entryCount - 1;
-  const ManifestEntry *attachedShim = &manifest->entries[attachedShimIndex];
+  const ManifestEntry *attachedShim = packed->entries[attachedShimIndex];
   if (manifest->header.defaultEntry == attachedShimIndex ||
-      attachedShim->type != SHIM_ENTRY_TYPE_SHIM ||
-      attachedShim->flags != SHIM_ENTRY_FLAG_EXECUTABLE ||
+      attachedShim->type != MF_ENTRY_TYPE_SHIM ||
+      attachedShim->flags != MF_ENTRY_FLAG_EXECUTABLE ||
       attachedShim->offset != primarySlot || attachedShim->size == 0 ||
       attachedShim->entryOffset != 0) {
     log_err("Input image has invalid Shim bounds.");
     return false;
   }
   for (size_t index = 0; index < entryCount; index++) {
-    const ManifestEntry *entry = &manifest->entries[index];
+    const ManifestEntry *entry = packed->entries[index];
     if (manifest_entry_type_name(entry->type) == NULL ||
-        !valid_name(entry->name) || entry->offset > SIZE_MAX ||
-        entry->size > SIZE_MAX ||
+        entry->offset > SIZE_MAX || entry->size > SIZE_MAX ||
         !range_inside(
             (size_t)entry->offset, (size_t)entry->size,
             (size_t)manifestOffset)) {
@@ -172,34 +196,35 @@ static bool load_packed(const char *path, PackedImage *packed)
 
   packed->manifest = manifest;
 
-  if (manifest->entries[0].offset != 0 ||
-      manifest->entries[0].type != SHIM_ENTRY_TYPE_LINUX ||
-      (manifest->entries[0].flags &
-       (SHIM_ENTRY_FLAG_BASE_IMAGE | SHIM_ENTRY_FLAG_EXECUTABLE)) !=
-          (SHIM_ENTRY_FLAG_BASE_IMAGE | SHIM_ENTRY_FLAG_EXECUTABLE) ||
-      (manifest->entries[0].flags &
-       ~(SHIM_ENTRY_FLAG_BASE_IMAGE | SHIM_ENTRY_FLAG_EXECUTABLE |
-         SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB)) != 0 ||
-      manifest->entries[0].size < ARM64_LINUX_IMAGE_HEADER_SIZE)
+  const ManifestEntry *baseEntry = packed->entries[0];
+  if (baseEntry->offset != 0 || baseEntry->type != MF_ENTRY_TYPE_LINUX ||
+      (baseEntry->flags &
+       (MF_ENTRY_FLAG_BASE_IMAGE | MF_ENTRY_FLAG_EXECUTABLE)) !=
+          (MF_ENTRY_FLAG_BASE_IMAGE | MF_ENTRY_FLAG_EXECUTABLE) ||
+      (baseEntry->flags &
+       ~(MF_ENTRY_FLAG_BASE_IMAGE | MF_ENTRY_FLAG_EXECUTABLE |
+         MF_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB)) != 0 ||
+      baseEntry->size < ARM64_LINUX_IMAGE_HEADER_SIZE)
     return false;
   size_t attachedShimEnd =
       (size_t)attachedShim->offset + (size_t)attachedShim->size;
   for (size_t index = 0; index < entryCount; index++) {
-    const ManifestEntry *entry = &manifest->entries[index];
+    const ManifestEntry *entry = packed->entries[index];
     uint32_t             allowedFlags =
-        index == 0 ? SHIM_ENTRY_FLAG_BASE_IMAGE | SHIM_ENTRY_FLAG_EXECUTABLE |
-                         SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB
-                   : SHIM_ENTRY_FLAG_COPY | SHIM_ENTRY_FLAG_EXECUTABLE |
-                         SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB |
-                         SHIM_ENTRY_FLAG_HAS_QC_ABOOT_HEADER;
-    bool copyImage = (entry->flags & SHIM_ENTRY_FLAG_COPY) != 0;
-    bool executable = (entry->flags & SHIM_ENTRY_FLAG_EXECUTABLE) != 0;
-    bool hasDtb = (entry->flags & SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB) != 0;
+        index == 0 ? MF_ENTRY_FLAG_BASE_IMAGE | MF_ENTRY_FLAG_EXECUTABLE |
+                         MF_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB
+                   : MF_ENTRY_FLAG_COPY | MF_ENTRY_FLAG_EXECUTABLE |
+                         MF_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB |
+                         MF_ENTRY_FLAG_HAS_QC_ABOOT_HEADER;
+    bool copyImage = (entry->flags & MF_ENTRY_FLAG_COPY) != 0;
+    bool executable = (entry->flags & MF_ENTRY_FLAG_EXECUTABLE) != 0;
+    bool hasDtb = (entry->flags & MF_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB) != 0;
     bool hasQcAboot =
-        (entry->flags & SHIM_ENTRY_FLAG_HAS_QC_ABOOT_HEADER) != 0;
-    if ((entry->flags & ~allowedFlags) != 0 || entry->alignment < 2 ||
-        entry->alignment > 31 ||
-        (hasQcAboot && entry->type != SHIM_ENTRY_TYPE_LINUX) ||
+        (entry->flags & MF_ENTRY_FLAG_HAS_QC_ABOOT_HEADER) != 0;
+    if ((entry->flags & ~allowedFlags) != 0 ||
+        entry->alignment < MANIFEST_ALIGNMENT_SHIFT_MIN ||
+        entry->alignment > MANIFEST_ALIGNMENT_SHIFT_MAX ||
+        (hasQcAboot && entry->type != MF_ENTRY_TYPE_LINUX) ||
         (copyImage && (entry->loadAddress == 0 || entry->copySizeMax == 0 ||
                        entry->size > entry->copySizeMax)) ||
         (!copyImage && entry->copySizeMax != 0)) {
@@ -218,9 +243,9 @@ static bool load_packed(const char *path, PackedImage *packed)
     }
     if (hasDtb) {
       if (!executable || entry->deviceTreeBlobEntry >= entryCount ||
-          manifest->entries[entry->deviceTreeBlobEntry].type !=
-              SHIM_ENTRY_TYPE_DTB ||
-          manifest->entries[entry->deviceTreeBlobEntry].flags != 0) {
+          packed->entries[entry->deviceTreeBlobEntry]->type !=
+              MF_ENTRY_TYPE_DTB ||
+          packed->entries[entry->deviceTreeBlobEntry]->flags != 0) {
         log_err(
             "Input image has an invalid DeviceTreeBlob "
             "reference.");
@@ -233,7 +258,7 @@ static bool load_packed(const char *path, PackedImage *packed)
       continue;
     }
     for (size_t previous = 1; previous < index; previous++) {
-      const ManifestEntry *other = &manifest->entries[previous];
+      const ManifestEntry *other = packed->entries[previous];
       if (ranges_overlap(
               (size_t)entry->offset, (size_t)entry->size, (size_t)other->offset,
               (size_t)other->size)) {
@@ -253,10 +278,10 @@ static bool restore_files(const PackedImage *packed, const char *directory)
   const Manifest      *manifest          = packed->manifest;
   size_t               entryCount        = manifest->header.entryCount;
   size_t               attachedShimIndex = entryCount - 1;
-  const ManifestEntry *attachedShim = &manifest->entries[attachedShimIndex];
+  const ManifestEntry *attachedShim = packed->entries[attachedShimIndex];
 
   FileContent base = {0};
-  base.fileSize    = (size_t)manifest->entries[0].size;
+  base.fileSize    = (size_t)packed->entries[0]->size;
   base.fileBuffer  = malloc(base.fileSize);
   if (base.fileBuffer == NULL)
     return false;
@@ -270,7 +295,7 @@ static bool restore_files(const PackedImage *packed, const char *directory)
   image_write_le64(
       base.fileBuffer + 0x30, manifest->header.baseImage.shimOffset);
   {
-    const ManifestEntry *baseEntry = &manifest->entries[0];
+    const ManifestEntry *baseEntry = packed->entries[0];
     uint8_t              prefix[QC_ABOOT_KERNEL_HDR_SIZE];
     size_t               prefixSize = packed->headerOffset;
     if (prefixSize > sizeof(prefix) ||
@@ -306,7 +331,7 @@ static bool restore_files(const PackedImage *packed, const char *directory)
     return false;
 
   for (size_t index = 1; index < attachedShimIndex; index++) {
-    const ManifestEntry *entry    = &manifest->entries[index];
+    const ManifestEntry *entry    = packed->entries[index];
     const char          *typeName = manifest_entry_type_name(entry->type);
     char                 name[64];
     snprintf(name, sizeof(name), "Image-%02zu-%s", index, typeName);
@@ -314,7 +339,7 @@ static bool restore_files(const PackedImage *packed, const char *directory)
       return false;
     uint8_t prefix[QC_ABOOT_KERNEL_HDR_SIZE];
     size_t  prefixSize = 0;
-    if (entry->flags & SHIM_ENTRY_FLAG_HAS_QC_ABOOT_HEADER) {
+    if (entry->flags & MF_ENTRY_FLAG_HAS_QC_ABOOT_HEADER) {
       if (!write_qc_aboot_header(prefix, entry->size))
         return false;
       prefixSize = QC_ABOOT_KERNEL_HDR_SIZE;
@@ -351,9 +376,13 @@ static bool write_config(const PackedImage *packed, const char *directory)
       file, "Default=Image-%02u\nTimeout=%u\n\n", manifest->header.defaultEntry,
       manifest->header.timeoutMs);
   for (size_t index = 0; index + 1 < manifest->header.entryCount; index++) {
-    const ManifestEntry *entry    = &manifest->entries[index];
+    const ManifestEntry *entry    = packed->entries[index];
     const char          *typeName = manifest_entry_type_name(entry->type);
-    fprintf(file, "[Image-%02zu]\nName=%s\n", index, entry->name);
+    if (fprintf(file, "[Image-%02zu]\nName=", index) < 0 ||
+        !write_name(file, entry) || fputc('\n', file) == EOF) {
+      fclose(file);
+      return false;
+    }
     if (index == 0)
       fprintf(file, "Path=BaseImage\n");
     else {
@@ -364,15 +393,15 @@ static bool write_config(const PackedImage *packed, const char *directory)
     fprintf(
         file, "Type=%s\nBaseImage=%s\nAlign=%llu\n", typeName,
         index == 0 ? "true" : "false", (unsigned long long)entry->alignment);
-    if (entry->flags & SHIM_ENTRY_FLAG_COPY)
+    if (entry->flags & MF_ENTRY_FLAG_COPY)
       fprintf(
           file, "CopyTo=0x%llx\nCopySizeMax=0x%llx\n",
           (unsigned long long)entry->loadAddress,
           (unsigned long long)entry->copySizeMax);
-    if (entry->flags & SHIM_ENTRY_FLAG_EXECUTABLE)
+    if ((entry->flags & MF_ENTRY_FLAG_EXECUTABLE) && index != 0)
       fprintf(
           file, "EntryOffset=0x%llx\n", (unsigned long long)entry->entryOffset);
-    if (entry->flags & SHIM_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB)
+    if (entry->flags & MF_ENTRY_FLAG_HAS_DEVICE_TREE_BLOB)
       fprintf(
           file, "DeviceTreeBlob=Image-%02llu\n",
           (unsigned long long)entry->deviceTreeBlobEntry);

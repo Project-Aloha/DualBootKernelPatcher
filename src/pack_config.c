@@ -60,16 +60,16 @@ static bool parse_u64(const char *value, uint64_t *result)
   return true;
 }
 
-static bool parse_bool(const char *value, int *result)
+static bool parse_bool(const char *value, bool *result)
 {
   if (strcmp(value, "true") == 0 || strcmp(value, "yes") == 0 ||
       strcmp(value, "1") == 0) {
-    *result = 1;
+    *result = true;
     return true;
   }
   if (strcmp(value, "false") == 0 || strcmp(value, "no") == 0 ||
       strcmp(value, "0") == 0) {
-    *result = 0;
+    *result = false;
     return true;
   }
   return false;
@@ -81,9 +81,9 @@ static bool parse_image_type(const char *value, uint32_t *result)
     const char *name;
     uint32_t    type;
   } types[] = {
-      {"Linux", SHIM_ENTRY_TYPE_LINUX}, {"FreeExec", SHIM_ENTRY_TYPE_FREE_EXEC},
-      {"Shim", SHIM_ENTRY_TYPE_SHIM},   {"Blob", SHIM_ENTRY_TYPE_BLOB},
-      {"DTB", SHIM_ENTRY_TYPE_DTB},     {"Manifest", SHIM_ENTRY_TYPE_MANIFEST},
+      {"Linux", MF_ENTRY_TYPE_LINUX}, {"FreeExec", MF_ENTRY_TYPE_FREE_EXEC},
+      {"Shim", MF_ENTRY_TYPE_SHIM},   {"Blob", MF_ENTRY_TYPE_BLOB},
+      {"DTB", MF_ENTRY_TYPE_DTB},     {"Manifest", MF_ENTRY_TYPE_MANIFEST},
   };
 
   for (size_t index = 0; index < sizeof(types) / sizeof(types[0]); index++) {
@@ -98,6 +98,32 @@ static bool parse_image_type(const char *value, uint32_t *result)
 static bool set_once(char *destination, size_t size, const char *value)
 {
   return destination[0] == '\0' && copy_text(destination, size, value);
+}
+
+static bool set_allocated_once(char **destination, const char *value)
+{
+  if (*destination != NULL)
+    return false;
+  size_t length = strlen(value);
+  char  *copy   = malloc(length + 1);
+  if (copy == NULL)
+    return false;
+  memcpy(copy, value, length + 1);
+  *destination = copy;
+  return true;
+}
+
+static bool valid_name(const char *name)
+{
+  size_t length = strlen(name);
+  if (length == 0)
+    return false;
+  for (size_t index = 0; index < length; index++) {
+    unsigned char character = (unsigned char)name[index];
+    if (character < 0x20 || character == 0x7f || character == ';')
+      return false;
+  }
+  return true;
 }
 
 static bool set_path_once(
@@ -122,7 +148,6 @@ find_or_add_image(ConfigParser *parser, const char *section)
 
   PackImageConfig *image = &parser->config.images[parser->config.imageCount++];
   memcpy(image->section, section, strlen(section) + 1);
-  image->baseImage = -1;
   return image;
 }
 
@@ -161,7 +186,7 @@ static int config_handler(
       valid = parse_u32(value, &parser->config.timeoutMs);
   }
   else if (strcmp(section, "Manifest") == 0) {
-    parser->config.manifest.present = 1;
+    parser->config.manifest.present = true;
     if (strcmp(name, "Type") == 0 && !parser->config.manifest.hasType) {
       valid = parse_image_type(value, &parser->config.manifest.type);
       parser->config.manifest.hasType = valid;
@@ -173,38 +198,64 @@ static int config_handler(
     PackImageConfig *image = find_or_add_image(parser, section);
     if (image != NULL) {
       if (strcmp(name, "Name") == 0)
-        valid = set_once(image->name, sizeof(image->name), value);
+        valid = set_allocated_once(&image->name, value);
       else if (strcmp(name, "Path") == 0)
         valid = set_path_once(image->path, sizeof(image->path), parser, value);
-      else if (strcmp(name, "Type") == 0 && !image->hasType) {
-        valid          = parse_image_type(value, &image->type);
-        image->hasType = valid;
-      }
-      else if (strcmp(name, "BaseImage") == 0 && image->baseImage == -1)
-        valid = parse_bool(value, &image->baseImage);
-      else if (strcmp(name, "CopyTo") == 0 && !image->hasCopyAddress) {
-        valid                 = parse_u64(value, &image->copyAddress);
-        image->hasCopyAddress = valid;
-      }
-      else if (strcmp(name, "CopySizeMax") == 0 && !image->hasCopySizeMax) {
-        valid                 = parse_u64(value, &image->copySizeMax);
-        image->hasCopySizeMax = valid;
-      }
-      else if (strcmp(name, "Align") == 0 && !image->hasAlignment) {
-        valid               = parse_u32(value, &image->alignment);
-        image->hasAlignment = valid;
-      }
-      else if (strcmp(name, "EntryOffset") == 0 && !image->hasEntryOffset) {
-        valid                 = parse_u64(value, &image->entryOffset);
-        image->hasEntryOffset = valid;
+      else if (
+          strcmp(name, "Type") == 0 &&
+          !(image->fieldsPresent & PACK_IMAGE_FIELD_TYPE)) {
+        valid = parse_image_type(value, &image->type);
+        if (valid)
+          image->fieldsPresent |= PACK_IMAGE_FIELD_TYPE;
       }
       else if (
-          strcmp(name, "DeviceTreeBlob") == 0 && !image->hasDeviceTreeBlob &&
+          strcmp(name, "BaseImage") == 0 &&
+          !(image->fieldsPresent & PACK_IMAGE_FIELD_BASE_IMAGE_SET)) {
+        bool baseImage = false;
+        valid = parse_bool(value, &baseImage);
+        if (valid) {
+          image->fieldsPresent |= PACK_IMAGE_FIELD_BASE_IMAGE_SET;
+          if (baseImage)
+            image->fieldsPresent |= PACK_IMAGE_FIELD_BASE_IMAGE;
+        }
+      }
+      else if (
+          strcmp(name, "CopyTo") == 0 &&
+          !(image->fieldsPresent & PACK_IMAGE_FIELD_COPY_ADDRESS)) {
+        valid = parse_u64(value, &image->copyAddress);
+        if (valid)
+          image->fieldsPresent |= PACK_IMAGE_FIELD_COPY_ADDRESS;
+      }
+      else if (
+          strcmp(name, "CopySizeMax") == 0 &&
+          !(image->fieldsPresent & PACK_IMAGE_FIELD_COPY_SIZE_MAX)) {
+        valid = parse_u64(value, &image->copySizeMax);
+        if (valid)
+          image->fieldsPresent |= PACK_IMAGE_FIELD_COPY_SIZE_MAX;
+      }
+      else if (
+          strcmp(name, "Align") == 0 &&
+          !(image->fieldsPresent & PACK_IMAGE_FIELD_ALIGNMENT)) {
+        valid = parse_u32(value, &image->alignment);
+        if (valid)
+          image->fieldsPresent |= PACK_IMAGE_FIELD_ALIGNMENT;
+      }
+      else if (
+          strcmp(name, "EntryOffset") == 0 &&
+          !(image->fieldsPresent & PACK_IMAGE_FIELD_ENTRY_OFFSET)) {
+        valid = parse_u64(value, &image->entryOffset);
+        if (valid)
+          image->fieldsPresent |= PACK_IMAGE_FIELD_ENTRY_OFFSET;
+      }
+      else if (
+          strcmp(name, "DeviceTreeBlob") == 0 &&
+          !(image->fieldsPresent & PACK_IMAGE_FIELD_DEVICE_TREE_BLOB) &&
           value[0] != '\0') {
         valid = copy_text(
-            image->deviceTreeBlobSection, sizeof(image->deviceTreeBlobSection),
+            image->dtbXref, sizeof(image->dtbXref),
             value);
-        image->hasDeviceTreeBlob = valid;
+        if (valid)
+          image->fieldsPresent |= PACK_IMAGE_FIELD_DEVICE_TREE_BLOB;
       }
     }
   }
@@ -253,34 +304,39 @@ static bool validate_config(
   bool   hasDeviceTreeBlobReference = false;
   for (size_t index = 0; index < config->imageCount; index++) {
     PackImageConfig *image = &config->images[index];
-    if (image->name[0] == '\0' || image->path[0] == '\0' || !image->hasType ||
-        image->baseImage == -1) {
-      log_err("[%s] requires Name, Path, Type and BaseImage.", image->section);
+    uint32_t requiredFields = PACK_IMAGE_FIELD_TYPE;
+    if (image->name == NULL || !valid_name(image->name) ||
+        image->path[0] == '\0' ||
+        (image->fieldsPresent & requiredFields) != requiredFields) {
+      log_err("[%s] requires Name, Path and Type.", image->section);
       return false;
     }
-    if (!image->hasAlignment)
-      image->alignment = 2;
-    if (image->alignment < 2 || image->alignment > 31) {
-      log_err("[%s] Align must be from 2 to 31.", image->section);
+    if (!(image->fieldsPresent & PACK_IMAGE_FIELD_ALIGNMENT))
+      image->alignment = MANIFEST_ALIGNMENT_SHIFT_MIN;
+    if (image->alignment < MANIFEST_ALIGNMENT_SHIFT_MIN ||
+        image->alignment > MANIFEST_ALIGNMENT_SHIFT_MAX) {
+      log_err(
+          "[%s] Align must be from %u to %u.", image->section,
+          MANIFEST_ALIGNMENT_SHIFT_MIN, MANIFEST_ALIGNMENT_SHIFT_MAX);
       return false;
     }
-    if (image->baseImage) {
-      if (image->type != SHIM_ENTRY_TYPE_LINUX) {
+    if (image->fieldsPresent & PACK_IMAGE_FIELD_BASE_IMAGE) {
+      if (image->type != MF_ENTRY_TYPE_LINUX) {
         log_err("Base image [%s] must set Type=Linux.", image->section);
         return false;
       }
-      if (image->hasCopyAddress) {
+      if (image->fieldsPresent & PACK_IMAGE_FIELD_COPY_ADDRESS) {
         log_err("Base image [%s] cannot set CopyTo.", image->section);
         return false;
       }
-      if (image->entryOffset != 0) {
+      if (image->fieldsPresent & PACK_IMAGE_FIELD_ENTRY_OFFSET) {
         log_err("Base image [%s] cannot set EntryOffset.", image->section);
         return false;
       }
       *baseImageIndex = index;
       baseImageCount++;
     }
-    if (image->hasCopyAddress) {
+    if (image->fieldsPresent & PACK_IMAGE_FIELD_COPY_ADDRESS) {
       if (image->copyAddress == 0) {
         log_err("[%s] CopyTo address must be non-zero.", image->section);
         return false;
@@ -292,7 +348,8 @@ static bool validate_config(
             image->section);
         return false;
       }
-      if (!image->hasCopySizeMax || image->copySizeMax == 0) {
+      if (!(image->fieldsPresent & PACK_IMAGE_FIELD_COPY_SIZE_MAX) ||
+          image->copySizeMax == 0) {
         log_err(
             "[%s] with CopyTo requires non-zero "
             "CopySizeMax.",
@@ -304,28 +361,32 @@ static bool validate_config(
         return false;
       }
     }
-    else if (image->hasCopySizeMax) {
+    else if (image->fieldsPresent & PACK_IMAGE_FIELD_COPY_SIZE_MAX) {
       log_err("[%s] CopySizeMax requires CopyTo.", image->section);
       return false;
     }
     bool executable = manifest_entry_type_is_executable(image->type);
-    if (image->type == SHIM_ENTRY_TYPE_MANIFEST) {
+    if (image->type == MF_ENTRY_TYPE_MANIFEST) {
       log_err(
           "[%s] must be configured as the [Manifest] "
           "section.",
           image->section);
       return false;
     }
-    if (!executable && image->hasEntryOffset) {
+    if (!executable &&
+        (image->fieldsPresent & PACK_IMAGE_FIELD_ENTRY_OFFSET)) {
       log_err("[%s] Type does not allow EntryOffset.", image->section);
       return false;
     }
-    if (image->hasDeviceTreeBlob && !executable) {
+    if ((image->fieldsPresent & PACK_IMAGE_FIELD_DEVICE_TREE_BLOB) &&
+        (!executable ||
+         (image->fieldsPresent & PACK_IMAGE_FIELD_COPY_ADDRESS))) {
       log_err(
           "[%s] DeviceTreeBlob requires an executable Type.", image->section);
       return false;
     }
-    hasDeviceTreeBlobReference |= image->hasDeviceTreeBlob;
+    hasDeviceTreeBlobReference |=
+      (image->fieldsPresent & PACK_IMAGE_FIELD_DEVICE_TREE_BLOB) != 0;
     if (config->defaultSection[0] != '\0' &&
         strcmp(image->section, config->defaultSection) == 0) {
       *defaultIndex = index;
@@ -335,7 +396,7 @@ static bool validate_config(
 
   if (config->manifest.present &&
       (!config->manifest.hasType ||
-       config->manifest.type != SHIM_ENTRY_TYPE_MANIFEST)) {
+       config->manifest.type != MF_ENTRY_TYPE_MANIFEST)) {
     log_err("[Manifest] must set Type=Manifest.");
     return false;
   }
@@ -351,22 +412,22 @@ static bool validate_config(
   }
   for (size_t index = 0; index < config->imageCount; index++) {
     PackImageConfig *image = &config->images[index];
-    if (!image->hasDeviceTreeBlob)
+    if (!(image->fieldsPresent & PACK_IMAGE_FIELD_DEVICE_TREE_BLOB))
       continue;
 
     bool found = false;
     for (size_t targetIndex = 0; targetIndex < config->imageCount;
          targetIndex++) {
       PackImageConfig *target = &config->images[targetIndex];
-      if (strcmp(target->section, image->deviceTreeBlobSection) != 0)
+      if (strcmp(target->section, image->dtbXref) != 0)
         continue;
-      if (target->type != SHIM_ENTRY_TYPE_DTB) {
+      if (target->type != MF_ENTRY_TYPE_DTB) {
         log_err(
             "[%s] DeviceTreeBlob [%s] must set Type=DTB.", image->section,
             target->section);
         return false;
       }
-      if (target->hasCopyAddress) {
+      if (target->fieldsPresent & PACK_IMAGE_FIELD_COPY_ADDRESS) {
         log_err(
             "[%s] DeviceTreeBlob [%s] cannot set CopyTo.", image->section,
             target->section);
@@ -380,7 +441,7 @@ static bool validate_config(
     if (!found) {
       log_err(
           "[%s] DeviceTreeBlob section [%s] was not found.", image->section,
-          image->deviceTreeBlobSection);
+          image->dtbXref);
       return false;
     }
   }
@@ -418,13 +479,21 @@ int PackConfigFile(const char *configPath)
       log_err(
           "Config line %d: %s", parseStatus,
           parser.error[0] != '\0' ? parser.error : "parse failure");
+    for (size_t index = 0; index < parser.config.imageCount; index++)
+      free(parser.config.images[index].name);
     return -EINVAL;
   }
 
   size_t baseImageIndex = 0;
   size_t defaultIndex   = SIZE_MAX;
-  if (!validate_config(&parser, &baseImageIndex, &defaultIndex))
+  if (!validate_config(&parser, &baseImageIndex, &defaultIndex)) {
+    for (size_t index = 0; index < parser.config.imageCount; index++)
+      free(parser.config.images[index].name);
     return -EINVAL;
+  }
 
-  return PackImage(&parser.config);
+  int status = PackImage(&parser.config);
+  for (size_t index = 0; index < parser.config.imageCount; index++)
+    free(parser.config.images[index].name);
+  return status;
 }
